@@ -13,8 +13,20 @@ npm run dev        # → http://localhost:8080/
 npm run check      # lint（語法／匯入圖／註冊表／體積）+ jsdom smoke（全部角色 × 全部路由 × 全部分頁）
 ```
 
-示範帳號密碼一律 `demo1234`：`chief@demo.troop`（旅長）／`leader@demo.troop`（旅層領袖）／`parent@demo.troop`（家長）。
-四個角色逐個登入睇 —— **導航會隨角色變**。免登入頁面：`public.html`、`notice.html?n=n-1`、`borrow.html`、`join.html?t=TROOP-LEAD-7F3A9C2E`。
+示範帳號密碼一律 `demo1234`，按旅閘嘅**身份分流**入：
+
+| 身份 | 示範帳號 | 睇得到咩 |
+|---|---|---|
+| 旅長／教練員 | `chief@demo.troop`／`coach@demo.troop` | 旅長＝15 個模組；教練員＝除「系統」外，只睇獲授權支部 |
+| 家長（監護人） | `parent@demo.troop` | 我的子女（跨 2 個支部）、通告、行事曆、繳費 |
+| 支部人員（**先揀團**） | 幼童軍團 `cs-leader@demo.troop`（團長）／`cs-deputy@demo.troop`（副團長）；深資童軍團 `vs-exec@demo.troop`（執委·主席）／`vs-team@demo.troop`（團隊長·18+）；童軍團 `sc-cpl@demo.troop`（副隊長·未夠 18） | 我的支部、通告、行事曆、物資；團長／副團長多「支部」入口 |
+| 平台超管（隱藏） | `super@platform.local`（入口 `index.html?step=super` 或旅閘撳 ⚜ 五下） | 平台：接入收件匣、units、金鑰輪換；唔會出現喺任何名單 |
+
+角色模型（2026-09-25 用戶定案）：旅層**只有旅長同教練員**（冇「旅層領袖」）；
+其餘全部係**支部人員**（團長／副團長／管委／執委／隊長／副隊長／團隊長／團員），帳號落該團支部 SHEET，
+但全部由旅呢個窗口入 —— **除旅長／教練員／家長外，入之前要先揀團**（旅要先對到該團下游，先讀到資料）。
+
+免登入頁面：`public.html`、`notice.html?n=n-1`、`borrow.html`、`join.html?t=TROOP-COA-7F3A9C2E`（教練員邀請）／`?t=TROOP-MEM-5C7D1F2A`（支部人員邀請）。
 
 示範模式死規矩：資料只住你部機（localStorage）、**唔會送去任何後端**、永遠唔會假裝寫入成功
 （寫入要撳頂部「儲存到後端」，收據要有 `confirmed:true` 先算數）。
