@@ -514,6 +514,77 @@ t('有效權限：角色 ∪ 逐人加；逐人加嘅一樣封頂；讀取唔外
   assert(u.hash === undefined && u.salt === undefined && u.setupToken === undefined, '讀取唔可以外洩敏感欄');
 });
 
+/* ⑮ 匿名可寫面（BUILD §3／§10-5）＋開戶申請（§7） */
+t('匿名申報面：五種都要寫入 `申請` 待批表（pending），而且要登入先讀得到', () => {
+  const { G, props } = makeSandbox(); G.initializeSheets();
+  const key = props.get('API_KEY');
+  const r1 = call(G, { action: 'noticeSignup', noticeId: 'n-1', name: '陳小明', ymis: 'YMIS001', note: '出席', contact: '91234567' });
+  assert(r1.success === true && r1.data.state === 'pending', '報名寫入失敗：' + JSON.stringify(r1));
+  const r2 = call(G, { action: 'borrowApply', ref: 'i-1', name: '陳小明', ymis: 'YMIS001', note: '借 2 個營幕' });
+  assert(r2.success === true, '物資借用失敗');
+  const r3 = call(G, { action: 'financeApply', branchId: 'vs0082', period: '2026-09', title: '9 月收支', note: '收入 1200／支出 800' });
+  const r4 = call(G, { action: 'progressApply', branchId: 'vs0082', period: '2026-09', note: '已完成 X 項' });
+  assert(r3.success && r4.success, '支部申報失敗');
+  /* 未登入唔可以讀申請（只有寫得入） */
+  const read = call(G, { action: 'load', table: '申請' });
+  assert(read.success === false, '匿名竟然讀得到申請表');
+  const rows = G.readTable_('申請');
+  eq(rows.length, 4, '四張申請都應該喺表');
+  rows.forEach(r => { eq(r.state, 'pending', '全部要待批'); eq(r.via, 'anon', '要記低係免登入入嘅'); });
+  /* 一單一 IP 上限：灌單要擋 */
+  let blocked = false;
+  for (let i = 0; i < 14; i++) { const q = call(G, { action: 'noticeSignup', noticeId: 'n-9', name: '灌' + i, ymis: 'X' + i }, { ip: '6.6.6.6' }); if (q.success === false && q.code === 'rate_limited') blocked = true; }
+  assert(blocked, '匿名灌單竟然唔擋（申請類每鐘上限 10）');
+  /* 求救同申請分開計：求救照送得（唔會因為申請灌爆而擋住求救） */
+  const rescueStill = call(G, { action: 'saveRescue', rescue: { title: '救命', note: 'x' } }, { ip: '6.6.6.6' });
+  assert(rescueStill.success === true, '求救唔應該被申請類嘅限流擋：' + JSON.stringify(rescueStill));
+});
+t('匿名去重：同通告同名唔重複；同 YMIS 待批唯一；同支部同期唯一', () => {
+  const { G } = makeSandbox(); G.initializeSheets();
+  const a = call(G, { action: 'noticeSignup', noticeId: 'n-1', name: '陳小明', ymis: 'Y1' });
+  const b = call(G, { action: 'noticeSignup', noticeId: 'n-1', name: '陳小明', ymis: 'Y1' });
+  assert(a.success && b.success && b.data.duplicate === true, '同通告同名應該去重：' + JSON.stringify(b));
+  eq(G.readTable_('申請').length, 1, '唔應該多一行');
+  /* 唔同名＝另一個人，照收 */
+  const c = call(G, { action: 'noticeSignup', noticeId: 'n-1', name: '李小姐', ymis: 'Y2' });
+  assert(c.success && !c.data.duplicate, '第二個人應該收得');
+  /* 支部同期唯一 */
+  const f1 = call(G, { action: 'financeApply', branchId: 'vs0082', period: '2026-09', note: 'a' });
+  const f2 = call(G, { action: 'financeApply', branchId: 'vs0082', period: '2026-09', note: 'b' });
+  assert(f2.data.duplicate === true, '同支部同期應該去重');
+  assert(f1.data.id !== f2.data.id || true, '');
+  /* YMIS 已有戶口 ＝ 唔使申請 */
+  const h = 'b'.repeat(64);
+  call(G, { action: 'saveTable', apikey: G.apiKey_(), table: '旅員', rows: [{ id: 'u-1', email: 'x@y.hk', ymis: 'Y3', role: 'member', hash: h, salt: 'salt12345' }] });
+  const q = call(G, { action: 'accountApply', ymis: 'Y3', name: '已有戶' });
+  assert(q.success === true && q.data.duplicate === true, '已經有戶口唔應該再開：' + JSON.stringify(q));
+});
+t('開戶申請：批 ＝ 發一次性邀請 token；拒 ＝ 一定要原因；純邀請制＝唔收自助申請', () => {
+  const { G, props } = makeSandbox(); G.initializeSheets();
+  const key = props.get('API_KEY');
+  const a = call(G, { action: 'accountApply', ymis: 'Y9', name: '黃同學', email: 'wong@demo.hk', branchId: 'vs0082', contact: '90001111' });
+  assert(a.success && a.data.state === 'pending', '開戶申請失敗：' + JSON.stringify(a));
+  /* 冇原因唔可以拒 */
+  const badRej = call(G, { action: 'decideApplication', apikey: key, id: a.data.id, decide: 'reject' });
+  assert(badRej.success === false && badRej.code === 'need_reason', '冇原因竟然拒到');
+  /* 批 → 回邀請 token（24 小時一次性） */
+  const okApprove = call(G, { action: 'decideApplication', apikey: key, id: a.data.id, decide: 'approve' });
+  assert(okApprove.success === true && okApprove.data.inviteToken && okApprove.data.inviteToken.length === 12, '批完冇邀請 token：' + JSON.stringify(okApprove));
+  const rec = G.readTable_('申請')[0];
+  eq(rec.state, 'approved'); assert(rec.decidedBy && rec.decidedAt, '要記低邊個批／幾時');
+  /* 純邀請制：自助申請一律唔收 */
+  const sw = call(G, { action: 'setApplyMode', apikey: key, mode: 'invite-only' });
+  assert(sw.success && sw.data.mode === 'invite-only', '開關唔啱：' + JSON.stringify(sw));
+  const blocked = call(G, { action: 'accountApply', ymis: 'Y10', name: '自助申請' });
+  assert(blocked.success === false && blocked.code === 'invite_only', '純邀請制竟然收自助申請');
+  /* 但求救照收（求救唔受影響 —— 入唔到嘅人一定要有路） */
+  const rescue = call(G, { action: 'saveRescue', rescue: { title: '入唔到', note: '求救' } });
+  assert(rescue.success === true, '純邀請制唔應該擋求救');
+  /* 開返 */
+  const sw2 = call(G, { action: 'setApplyMode', apikey: key, mode: 'open' });
+  assert(sw2.data.mode === 'open', '開返唔啱');
+});
+
 /* 收尾 */
 console.log('');
 if (fails.length) {

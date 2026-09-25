@@ -129,6 +129,17 @@ export function render(el, params, query = {}) {
       })
     })}
     ${notice('開戶錨點照跟：<b>教練員／家長＝旅</b>；<b>支部人員＝該團支部</b>（只可以由該團落筆，旅長代發係經 sig）。', 'info')}
+    ${card({ title: '開戶申請模式（BUILD §7）', body: `
+      <div class="flex-b">
+        <div>
+          <b class="sm">${S.load().settings.applyMode === 'invite-only' ? '純邀請制' : '開放申請'}</b>
+          <div class="xs faint mt-4">${S.load().settings.applyMode === 'invite-only'
+        ? '唔收自助申請：只有旅長／教練員發出嘅邀請連結入得（求救照樣收 —— 入唔到嘅人一定要有路）。'
+        : '收自助申請：成員入口遞交（YMIS ＋ 姓名 ＋ 聯絡）→ 待批 → 領袖對名冊核對 → 批 ＝ 開戶或發邀請連結；拒 ＝ 一定要寫原因。'}</div>
+        </div>
+        <button class="btn sm ${S.load().settings.applyMode === 'invite-only' ? '' : 'primary'}" id="apply-mode">${S.load().settings.applyMode === 'invite-only' ? '改回：開放申請' : '改為：純邀請制'}</button>
+      </div>
+      ${notice('同 YMIS 待批唯一：同一個 YMIS 未批完之前唔會多過一張申請；已經有戶口嘅 YMIS 直接唔收（唔會撞戶）。', 'info')}` })}
     `;
   } else if (tab === 'perms') {
     const cols = MODULE_ROLE_COLS;
@@ -195,6 +206,13 @@ export function render(el, params, query = {}) {
   });
 
   el.querySelectorAll('[data-tab]').forEach(t => t.addEventListener('click', () => go('users?tab=' + t.dataset.tab)));
+  el.querySelector('#apply-mode')?.addEventListener('click', () => {
+    const now = S.load().settings.applyMode === 'invite-only' ? 'open' : 'invite-only';
+    S.commit(x => { x.settings.applyMode = now; });
+    S.audit('改開戶申請模式', now === 'invite-only' ? '純邀請制' : '開放申請', '旅長設定');
+    toast(now === 'invite-only' ? '已改為純邀請制：唔收自助申請（求救照收）' : '已改為開放申請：成員入口可以遞交', 'ok');
+    go('users?tab=invites');
+  });
   el.querySelector('#us-q')?.addEventListener('keydown', e => { if (e.key === 'Enter') go('users?q=' + encodeURIComponent(e.target.value)); });
   el.querySelector('#us-invite')?.addEventListener('click', () => openInvite('coach'));
   el.querySelector('#iv-new')?.addEventListener('click', () => openInvite());

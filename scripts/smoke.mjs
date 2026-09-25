@@ -1286,6 +1286,88 @@ await test('★ 體積治理：單檔 ≤5MB、每筆 ≤3 張、AVIF／WebP 優
   assert(F.checkSize({ distBytes: 1, bundleBytes: 1 }).ok === true && F.checkSize({ distBytes: 9e9 }).ok === false, '體積報表要判得啱');
 });
 
+await test('★ 教材三層跟版本走：docs/教材/*.md 真係存在，UI 對照表冇死連結', async () => {
+  const { existsSync } = await import('node:fs');
+  const docs = await import('../assets/js/views/docs.js');
+  assert(docs.DOC_FILES.length >= 9, '教材檔案對照表唔齊（角色 5 ＋ 模組 ＋ MOCK ＋ checklist ＋ 開戶）');
+  docs.DOC_FILES.forEach(f => {
+    assert(f.file.startsWith('docs/教材/'), '教材要放 docs/教材/：' + f.file);
+    assert(existsSync(join(ROOT, f.file)), '教材檔案唔存在：' + f.file);
+    const body = readFileSync(join(ROOT, f.file), 'utf8');
+    assert(body.length > 200, `教材太短（似係空檔）：${f.file}`);
+    assert(/我而家應該做咩|checklist|規矩|五分鐘/.test(body), `教材要有「跟住做」嘅指引：${f.file}`);
+  });
+  /* 角色快速入門：五個角色都要有 */
+  ['旅長', '教練員', '家長', '支部人員', '平台超管'].forEach(r => {
+    assert(docs.DOC_FILES.some(f => f.who === r), '欠角色教材：' + r);
+  });
+  /* README 索引要列齊 */
+  const idx = readFileSync(join(ROOT, 'docs/教材/README.md'), 'utf8');
+  docs.DOC_FILES.forEach(f => assert(idx.includes(f.file.replace('docs/教材/', '')), '教材索引漏咗：' + f.file));
+  /* 開旅 checklist 唔可以再叫人用「臨時密碼」（密碼只由網站 PBKDF2 落 hash） */
+  const cl = readFileSync(join(ROOT, 'docs/教材/08-開旅-checklist.md'), 'utf8');
+  assert(cl.includes('setup token'), '開旅 checklist 要講 setup token');
+  assert(!/臨時密碼/.test(cl), '開旅 checklist 唔應該再提臨時密碼（GAS 唔經手明文密碼）');
+});
+
+await test('★ 純邀請制開關：UI 有、store 有、預設開放申請（求救唔受影響）', async () => {
+  const d = S.load();
+  eq(d.settings.applyMode, 'open', '預設要係開放申請');
+  const users = readFileSync(join(ROOT, 'assets/js/views/users.js'), 'utf8');
+  assert(/apply-mode/.test(users) && /invite-only/.test(users), '用戶與身份要有純邀請制開關');
+  assert(/求救照收|求救照樣收/.test(users), '要寫明求救唔受純邀請制影響');
+  A.loginAs('u-chief');
+  main.boot();
+  fireHash(w, '#/users?tab=invites');
+  const btn = document.querySelector('#apply-mode');
+  assert(btn, '開關掣唔見咗；session＝' + JSON.stringify(S.getSession()?.role || null) + '；body＝' + (document.body?.textContent || '').slice(0, 120) + '；hash＝' + loc.hash);
+  btn.click();
+  eq(S.load().settings.applyMode, 'invite-only', '撳完要變純邀請制');
+  assert(S.load().audit.some(a => String(a.action).includes('開戶申請模式')), '切換要入審計');
+  fireHash(w, '#/users?tab=invites');
+  main.boot();
+  fireHash(w, '#/users?tab=invites');
+  document.querySelector('#apply-mode').click();
+  eq(S.load().settings.applyMode, 'open', '要撳得返開放申請');
+});
+
+await test('★ merge3：唔同欄各自保留；同一格衝突唔自動揀（逐格 ask）；批量才 serverTime 新者勝', async () => {
+  const OB = await import('../assets/js/lib/offline.js');
+  const base = { title: '中秋露營', place: '西貢', quota: 20 };
+  const mine = { title: '中秋露營（改期）', place: '西貢', quota: 20 };
+  const theirs = { title: '中秋露營', place: '大埔', quota: 20 };
+  const r = OB.merge3(base, mine, theirs);
+  eq(r.merged.title, '中秋露營（改期）', '我改嗰欄用我嘅');
+  eq(r.merged.place, '大埔', '佢改嗰欄用佢嘅');
+  eq(r.merged.quota, 20, '冇人改＝跟 base');
+  eq(r.asks.length, 0, '唔同欄唔算衝突');
+  /* 同一格兩邊都改 → ask（唔自動揀） */
+  const r2 = OB.merge3(base, { title: '我嘅版本' }, { title: '佢嘅版本' });
+  eq(r2.asks.join(','), 'title', '同一格要彈出嚟問');
+  eq(r2.took, 'ask');
+  /* 兩邊改到一樣 → 唔算衝突 */
+  const r3 = OB.merge3(base, { title: '一樣' }, { title: '一樣' });
+  eq(r3.asks.length, 0, '改到一樣唔應該當衝突');
+  eq(r3.fields.title, 'both-same');
+  /* 批量／無人看場：serverTime 新者勝，但留底 */
+  const b1 = OB.merge3Batch({ base, mine: { title: '我嘅' }, theirs: { title: '佢嘅' }, mineAt: 100, theirsAt: 200 });
+  eq(b1.merged.title, '佢嘅', '後端較新＝佢贏');
+  eq(b1.asks.length, 0, '批量唔會問');
+  eq(b1.took, 'serverTime');
+  assert(b1.overwrote.length === 1 && b1.overwrote[0].field === 'title', '要留底（食咗邊個改動）');
+  const b2 = OB.merge3Batch({ base, mine: { title: '我嘅' }, theirs: { title: '佢嘅' }, mineAt: 200, theirsAt: 100 });
+  eq(b2.merged.title, '我嘅', '我較新＝我贏');
+  /* 逐行合併：新增／刪除／衝突都認得出 */
+  const rows = OB.merge3Rows(
+    [{ id: 'n-1', title: 'A' }, { id: 'n-2', title: 'B' }],
+    [{ id: 'n-1', title: '我改嘅' }, { id: 'n-3', title: 'C' }],
+    [{ id: 'n-1', title: '佢改嘅' }, { id: 'n-2', title: 'B2' }]
+  );
+  assert(rows.added.includes('n-3'), '我新增嘅行要保留');
+  assert(rows.deleted.includes('n-2'), '佢冇咗嗰行要當刪除（唔會靜靜復活）');
+  assert(rows.asks.some(a => a.id === 'n-1'), '同一行同一欄都改過 → 要問');
+});
+
 /* ---------- 互動掃描：撳晒所有掣，唔可以有例外 ---------- */
 const asyncErrors = [];
 process.on('unhandledRejection', e => asyncErrors.push(String(e && e.message ? e.message : e)));

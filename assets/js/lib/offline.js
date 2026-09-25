@@ -95,6 +95,67 @@ export function resolveConflict({ tables = {}, baseVersion, remoteVersion, remot
   return { action: 'manual', note: '版本比唔到（未知）→ 唔會自動做，要人手揀', perTable: Object.keys(tables).map(t => ({ table: t, default: 'ask' })) };
 }
 
+/* ---------------- merge3：欄位級三方合併（BUILD §3） ----------------
+   base ＝ 登入嗰陣嘅快照；mine ＝ 我改咗嘅；theirs ＝ 後端而家嘅
+   規矩（照 BUILD 寫）：
+     · 唔同欄各自保留（我改嗰欄用我嘅、佢改嗰欄用佢嘅）
+     · **同一格兩邊都改過** → 唔自動揀，彈出嚟由用戶逐格確認（ask）
+     · 批量／無人看場 → serverTime 新者勝 ＋ 紅點留底（記低食咗邊個改動）
+   ---------------------------------------------------------------- */
+const clone = v => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
+const same = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+
+/**
+ * 三方合併一個物件（逐欄；值係 array 都當一欄）
+ * @returns {{merged:object, fields:object, asks:string[], took:string}}
+ */
+export function merge3(base = {}, mine = {}, theirs = {}) {
+  const keys = new Set([...Object.keys(base || {}), ...Object.keys(mine || {}), ...Object.keys(theirs || {})]);
+  const merged = {}, fields = {}, asks = [];
+  keys.forEach(k => {
+    const b = base?.[k], m = mine?.[k], t = theirs?.[k];
+    const mineChanged = !same(m, b), theirsChanged = !same(t, b);
+    if (mineChanged && theirsChanged) {
+      if (same(m, t)) { merged[k] = clone(m); fields[k] = 'both-same'; }           // 兩邊改到一樣 → 冇衝突
+      else { asks.push(k); fields[k] = 'ask'; merged[k] = clone(m); }              // 同一格衝突 → 留我嘅，等用戶揀
+    } else if (mineChanged) { merged[k] = clone(m); fields[k] = 'mine'; }
+    else if (theirsChanged) { merged[k] = clone(t); fields[k] = 'theirs'; }
+    else { merged[k] = clone(b); fields[k] = 'same'; }
+  });
+  return { merged, fields, asks, took: asks.length ? 'ask' : 'merged' };
+}
+/** 批量／無人看場：同格衝突用 serverTime 新者勝，但留底（紅點紀錄） */
+export function merge3Batch({ base = {}, mine = {}, theirs = {}, mineAt = 0, theirsAt = 0 } = {}) {
+  const r = merge3(base, mine, theirs);
+  const theirsNewer = Number(theirsAt) > Number(mineAt);
+  const overwrote = [];
+  r.asks.forEach(k => {
+    r.merged[k] = clone(theirsNewer ? theirs[k] : mine[k]);
+    r.fields[k] = theirsNewer ? 'theirs-serverTime' : 'mine-serverTime';
+    overwrote.push({ field: k, took: theirsNewer ? 'theirs' : 'mine', why: 'serverTime 新者勝（無人看場）' });
+  });
+  return { ...r, asks: [], took: 'serverTime', overwrote };
+}
+/** 逐行合併：以 id 對齊；兩邊都改同一行同一欄 → ask */
+export function merge3Rows(baseRows = [], mineRows = [], theirsRows = [], key = 'id') {
+  const by = rows => Object.fromEntries((Array.isArray(rows) ? rows : []).map(r => [String(r?.[key]), r]));
+  const b = by(baseRows), m = by(mineRows), t = by(theirsRows);
+  const ids = new Set([...Object.keys(b), ...Object.keys(m), ...Object.keys(t)]);
+  const out = { rows: [], asks: [], added: [], deleted: [] };
+  ids.forEach(id => {
+    const base = b[id], mine = m[id], theirs = t[id];
+    if (base && !mine && !theirs) return;
+    if (base && mine && !theirs) { out.deleted.push(id); return; }              // 佢刪咗
+    if (base && theirs && !mine) { out.deleted.push(id); return; }              // 我刪咗
+    if (!base && mine) { out.rows.push(clone(mine)); out.added.push(id); return; }      // 我新增
+    if (!base && theirs) { out.rows.push(clone(theirs)); out.added.push(id); return; }  // 佢新增
+    const r = merge3(base || {}, mine || {}, theirs || {});
+    if (r.asks.length) out.asks.push({ id, fields: r.asks });
+    out.rows.push({ ...r.merged, [key]: id });
+  });
+  return out;
+}
+
 /* ---------------- 排隊重試（backoff ＋ jitter） ---------------- */
 export const RETRY = { tries: 5, baseMs: 250, capMs: 8000 };
 /** 第 n 次重試等幾多（毫秒）：指數 ＋ 隨機抖動（防同時重試撞埋） */

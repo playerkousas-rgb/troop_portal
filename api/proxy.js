@@ -29,17 +29,21 @@ export const GAS_WHITELIST = [
   'setLocalLogin', 'getLoginMode', 'getLinkState', 'listModules', 'setModule',
   'getSummary', 'getAuditLog', 'getAccessLog', 'saveAudit', 'logAccess',
   /* P1：支部狀態／分享／求救／內容寫入 */
-  'registry', 'saveShare', 'saveRescue', 'getTombstones'
+  'registry', 'saveShare', 'saveRescue', 'getTombstones',
+  /* P2：批核（開戶申請／申報）＋申請模式 */
+  'decideApplication', 'setApplyMode', 'getApplyMode'
 ];
 /** 只有旅長（role=chief）先可以用（寫入類／管治類） */
 export const CHIEF_ONLY = [
   'saveNotice', 'saveFinanceEntry', 'saveShare', 'setUnitStatus',
   'deleteRow', 'saveDbPart', 'purgeTombstones',          // 破壞性／體積治理：只旅長做得
+  'setApplyMode',                                        // 開戶申請模式：旅長決定（唔想有人靜靜改收生政策）
   'createInvite', 'revokeInvite', 'registerDownstream', 'updateDownstream', 'removeDownstream',
   'setLocalLogin', 'setModule', 'upsertUser', 'setUserStatus', 'deleteUser', 'resetPassword'
 ];
 /** 旅長 ＋ 教練員（coach）都可以用 */
-export const LEADER_ACTIONS = ['testDownstream', 'openAccountForDownstream', 'importUsers', 'updateUserProfile', 'updateUserRole', 'updatePermissions'];
+export const LEADER_ACTIONS = ['testDownstream', 'openAccountForDownstream', 'importUsers', 'updateUserProfile', 'updateUserRole', 'updatePermissions',
+  'decideApplication'];   // 批核：旅長／教練員都做得（拒一定要有原因）
 /** 唔使 session 都讀得（只係健康／公開讀） */
 const PUBLIC_GAS = ['status'];
 

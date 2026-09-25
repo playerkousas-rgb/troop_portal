@@ -473,6 +473,7 @@ export function makeDemo() {
       noticeDefaultVis: 2,
       financeDueDay: 5,
       publicOpen: true,                   // 有冇開放公開頁（免登入）
+      applyMode: 'open',                  // open＝收自助開戶申請；invite-only＝純邀請制（BUILD §7）
       mockWatermark: true
     },
     _exportedFrom: undefined

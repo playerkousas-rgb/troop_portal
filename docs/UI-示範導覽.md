@@ -183,7 +183,9 @@ App 內已經有一頁「**功能藍圖**」（教學 → 功能藍圖，或 `#/
 | Drive 備份 | ✅ `Code.gs backupToDrive`（建立即 PRIVATE）；13 份輪替未做 | 排程屬平台側 |
 | 版本樂觀鎖／backoff 重試／離線隊列 | ✅ `assets/js/lib/offline.js`（三色燈＋`baseVersion`＋唔自動覆蓋） | — |
 | 大庫分件／tombstone purge | ✅ `saveDbPart`／`deleteRow`＋`purgeTombstones`（90 日） | — |
-| merge3 欄位級合併 | 未做（而家逐表揀「用我嘅／用後端嘅」） | P2 |
+| merge3 欄位級合併 | ✅ `offline.js merge3／merge3Batch／merge3Rows`（同一格衝突逐格 ask；批量 serverTime 新者勝＋留底） | — |
+| 匿名可寫面（報名／借用／收支／進度／開戶） | ✅ GAS 白名單 action ＋限流＋待批表＋去重；批／拒（拒要原因） | 真環境實測 |
+| 教材三層 | ✅ `docs/教材/`（9 份）＋UI 對照表（smoke 驗冇死連結） | — |
 | 成員端（各團 `members.html`） | 屬各支部 repo | 各團自己 |
 
 ## 5b. 真模式對接（P0 已寫好）
@@ -215,4 +217,5 @@ npm run api-test # /api：PBKDF2 100k／session 防篡改／票據防重放／�
 npm run check    # 以上全部
 ```
 
-現況（2026-09-26 · P1）：`lint` 全綠（51 檔 · 867 KB）、`smoke` **73/73**、旅 GAS 本機測試 **31/31**、`/api` 測試 **18/18**。
+現況（2026-09-26 · P2）：`lint` 全綠（51 檔 · 888 KB）、`smoke` **76/76**、旅 GAS 本機測試 **34/34**、`/api` 測試 **19/19**；
+教材（角色 ×5／模組／示範任務／開旅 checklist／開戶與批核）落 `docs/教材/`，UI「系統 → 教學」有同一份對照表。

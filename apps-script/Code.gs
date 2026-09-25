@@ -31,15 +31,22 @@ var SUPER_VERIFY_URL = 'https://troop-portal.vercel.app/api/super';
 /** 每次寫入上限（B／D 唔落 Sheet，所以只係防呆） */
 var LIMITS = { body: 900 * 1024, rowsPerWrite: 20000, importRows: 2000, loginFails: 5, lockMs: 15 * 60 * 1000, sigSkewMs: 5 * 60 * 1000, anonWrites: 3, anonWindowSec: 3600 };
 
-/** 匿名可寫面（BUILD §10-5）：**只可以 append、有數量上限**；其他一律要 apikey／sig */
-var ANON_WRITE_ACTIONS = ['saveRescue'];
+/** 匿名可寫面（BUILD §3／§10-5）：**只可以 append、有數量上限、寫入待批表**；其他一律要 apikey／sig
+    通告報名（同通告同人去重）／物資借用／收支申報／進度申報／開戶申請／求救 */
+var ANON_WRITE_ACTIONS = ['saveRescue', 'noticeSignup', 'borrowApply', 'financeApply', 'progressApply', 'accountApply'];
+/** 匿名申報類要落 `申請` 待批表嘅種類（求救另有自己一張表） */
+var ANON_APPLY_KINDS = { signup: 'signup', borrow: 'borrow', finance: 'finance', progress: 'progress', account: 'account' };
+var ANON_MAX_ROWS = { title: 120, note: 2000, name: 60, contact: 80, ymis: 20 };
 
-/** 匿名寫入限流：同一 IP 每個鐘最多 3 單（CacheService；超額＝誠實拒） */
-function anonQuotaOk_(ip) {
-  var k = 'anonw_' + ip, n = Number(cache_().get(k) || 0);
-  if (n >= LIMITS.anonWrites) return { ok: false, used: n };
+/** 匿名寫入限流：求救（急，但唔可以灌）同一般申請分開計（CacheService；超額＝誠實拒） */
+var ANON_QUOTA = { rescue: 3, apply: 10 };        // 每 IP 每個鐘
+function anonQuotaOk_(ip, family) {
+  var fam = family === 'rescue' ? 'rescue' : 'apply';
+  var max = ANON_QUOTA[fam];
+  var k = 'anonw_' + fam + '_' + ip, n = Number(cache_().get(k) || 0);
+  if (n >= max) return { ok: false, used: n, max: max, family: fam };
   cache_().put(k, String(n + 1), LIMITS.anonWindowSec);
-  return { ok: true, used: n + 1 };
+  return { ok: true, used: n + 1, max: max, family: fam };
 }
 
 /** 泛用表（每個一張分頁；每行 = 一筆 JSON，header 固定） */
@@ -81,7 +88,8 @@ var ACTIONS = ['status', 'dbInfo', 'load', 'loadTables', 'saveTables', 'saveTabl
   'getDownstreams', 'registerDownstream', 'testDownstream', 'updateDownstream', 'removeDownstream', 'setDownstreamApi',
   'setLocalLogin', 'openAccountForDownstream', 'listModules', 'setModule', 'exportAll', 'importAll',
   'saveAudit', 'logAccess', 'getAuditLog', 'getAccessLog', 'purgeOldLogs', 'backupToDrive', 'setupWithToken',
-  'registry', 'setUnitStatus', 'saveShare', 'saveRescue', 'deleteRow', 'getTombstones', 'saveDbPart', 'purgeTombstones'];
+  'registry', 'setUnitStatus', 'saveShare', 'saveRescue', 'deleteRow', 'getTombstones', 'saveDbPart', 'purgeTombstones',
+  'noticeSignup', 'borrowApply', 'financeApply', 'progressApply', 'accountApply', 'decideApplication', 'setApplyMode', 'getApplyMode'];
 
 /** 需要 apikey（＝server 側）嘅敏感 action */
 var SERVER_ONLY = ['authUser', 'dbInfo', 'exportAll', 'importAll', 'backupToDrive', 'purgeOldLogs'];
@@ -936,9 +944,19 @@ function doPost(e) {
       if (!v.ok) { bumpFail_(CTX.ip); access_('SIG_FAIL', '', CTX.ip, action + '：' + v.msg); return ContentService.createTextOutput(json_(err_('bad_sig', v.msg))).setMimeType(ContentService.MimeType.JSON); }
       CTX.mode = 'upstream'; CTX.actor = 'upstream'; clearFails_(CTX.ip);
     } else if (ANON_WRITE_ACTIONS.indexOf(action) >= 0) {
+      /* 純邀請制：自助申請一律唔收（開戶申請） */
+      if (action === 'accountApply' && readApplyMode_() === 'invite-only') {
+        return ContentService.createTextOutput(json_(err_('invite_only', '呢個旅係純邀請制：只收旅長／教練員發出嘅邀請連結'))).setMimeType(ContentService.MimeType.JSON);
+      }
       /* 匿名可寫（求救）：有上限；落 `操作紀錄` 記低（誰／邊個 IP／幾時） */
-      var q = anonQuotaOk_(CTX.ip);
-      if (!q.ok) { access_('ANON_LIMIT', '', CTX.ip, action + '：已經 ' + q.used + ' 單'); return ContentService.createTextOutput(json_(err_('rate_limited', '同一個網絡今日送得太多單 —— 請等一等，或者用官方回報頁'))).setMimeType(ContentService.MimeType.JSON); }
+      var fam = action === 'saveRescue' ? 'rescue' : 'apply';
+      var q = anonQuotaOk_(CTX.ip, fam);
+      if (!q.ok) {
+        access_('ANON_LIMIT', '', CTX.ip, action + '：' + fam + ' 已經 ' + q.used + '/' + q.max);
+        return ContentService.createTextOutput(json_(err_('rate_limited', fam === 'rescue'
+          ? '同一個網絡每個鐘最多送 3 單求救 —— 請等一等，或者用官方回報頁'
+          : '同一個網絡每個鐘最多送 10 單申請 —— 請等一等'))).setMimeType(ContentService.MimeType.JSON);
+      }
       access_('ANON_WRITE', '', CTX.ip, action);
     } else if (['login', 'superLogin', 'redeemInvite', 'status', 'getDownstreams', 'registry'].indexOf(action) < 0) {
       return ContentService.createTextOutput(json_(err_('need_auth', '要 apikey 或 sig（或者用 login 類 action）'))).setMimeType(ContentService.MimeType.JSON);
@@ -1090,7 +1108,7 @@ function dispatch_(action, body, params) {
     case 'getCalendar': return ok_(readTable_('旅行事曆'));
     case 'getPublicProfile': return ok_(readTable_('公開資料'));
     case 'getApplications': return ok_(readTable_('申請'));
-    case 'getConfig': return ok_({ unit: unitId_(), app: APP, modules: listModules_(), localLogin: readGate_() });
+    case 'getConfig': return ok_({ unit: unitId_(), app: APP, modules: listModules_(), localLogin: readGate_(), applyMode: readApplyMode_() });
     case 'getSummary': return ok_({
       unit: unitId_(), name: (readTable_('公開資料')[0] || {}).name || '',
       branches: readTable_('支部').length, users: readUsers_().length,
@@ -1161,6 +1179,14 @@ function dispatch_(action, body, params) {
     case 'saveNotice': return saveNotice(body);
     case 'saveShare': return saveShare(body);
     case 'saveRescue': return saveRescue(body);
+    case 'noticeSignup': return noticeSignup(body);
+    case 'borrowApply': return borrowApply(body);
+    case 'financeApply': return financeApply(body);
+    case 'progressApply': return progressApply(body);
+    case 'accountApply': return accountApply(body);
+    case 'decideApplication': return decideApplication(body);
+    case 'setApplyMode': return wrap_(setApplyMode(body), 'mode_fail');
+    case 'getApplyMode': return ok_({ mode: readApplyMode_() });
     case 'registry': return ok_(registry());
     case 'deleteRow': return deleteRow(body);
     case 'saveDbPart': {
@@ -1229,6 +1255,100 @@ function saveShare(o) {
   if (!w.ok) return err_('write_fail', w.msg);
   audit_(actor_(), '發起分享', rec.id, rec.title + ' → ' + (rec.to.join('、') || '（未揀對象）'), CTX.mode === 'server' ? 'api' : 'ui');
   return ok_({ saved: true, id: rec.id, to: rec.to, state: rec.state });
+}
+/** 匿名申報 → `申請` 待批表（唯一入口；領袖對名冊核對之後批／拒）
+    去重規矩（照 BUILD）：同通告同名去重／同 YMIS 待批唯一／同支部同期唯一 */
+function applyPush_(kind, o, dedupeKey) {
+  if (!ANON_APPLY_KINDS[kind]) return err_('bad_kind', '唔支援呢種申請：' + kind);
+  var rows = readTable_('申請');
+  if (dedupeKey) {
+    var dup = rows.filter(function (r) {
+      return String(r.kind) === kind && String(r.dedupe || '') === dedupeKey && String(r.state || 'pending') === 'pending';
+    })[0];
+    if (dup) return ok_({ duplicate: true, id: dup.id, state: dup.state, note: '同一個申請已經待批（唔會重複）' });
+  }
+  var rec = {
+    id: uid_('ap'), kind: kind, at: stamp_(),
+    name: String(o.name || '').slice(0, ANON_MAX_ROWS.name),
+    contact: String(o.contact || '').slice(0, ANON_MAX_ROWS.contact),
+    ymis: sanitizeLabel_(o.ymis || ''),
+    branchId: sanitizeLabel_(o.branchId || ''),
+    email: String(o.email || '').slice(0, 80),
+    title: String(o.title || '').slice(0, ANON_MAX_ROWS.title),
+    note: String(o.note || '').slice(0, ANON_MAX_ROWS.note),
+    ref: sanitizeLabel_(o.ref || ''),                 // 通告／物資／期數嘅 id
+    state: 'pending', via: 'anon', ip: String(CTX.ip || '').slice(0, 40),
+    dedupe: dedupeKey || '', decidedBy: '', decidedAt: '', reason: ''
+  };
+  rows.push(rec);
+  var w = writeTable_('申請', rows, rec.name || '（免登入）');
+  if (!w.ok) return err_('write_fail', w.msg);
+  audit_('（免登入）', '收到申請：' + kind, rec.id, rec.title || rec.ref || rec.ymis, 'anon');
+  return ok_({ saved: true, id: rec.id, kind: kind, state: 'pending', at: rec.at });
+}
+/** 通告報名（免登入）：同通告同名去重 */
+function noticeSignup(o) {
+  if (!o.ref && !o.noticeId) return err_('bad_ref', '要通告編號');
+  var ref = sanitizeLabel_(o.ref || o.noticeId);
+  return applyPush_('signup', o, ref + '|' + sanitizeLabel_(o.name) + '|' + sanitizeLabel_(o.ymis));
+}
+/** 物資借用（免登入）：同一人同一件同一日唔重複 */
+function borrowApply(o) {
+  if (!o.ref) return err_('bad_ref', '要物資編號');
+  return applyPush_('borrow', o, sanitizeLabel_(o.ref) + '|' + sanitizeLabel_(o.ymis || o.name) + '|' + stamp_().slice(0, 10));
+}
+/** 收支申報（免登入；支部用）：同支部同期唯一 */
+function financeApply(o) {
+  return applyPush_('finance', o, sanitizeLabel_(o.branchId) + '|' + sanitizeLabel_(o.period));
+}
+/** 進度申報（免登入；支部用）：同支部同期唯一 */
+function progressApply(o) {
+  return applyPush_('progress', o, sanitizeLabel_(o.branchId) + '|' + sanitizeLabel_(o.period));
+}
+/** 開戶申請（免登入；成員入口）：**同 YMIS 待批唯一** */
+function accountApply(o) {
+  if (!o.ymis) return err_('bad_ymis', '要 YMIS（唔係會員編號唔開得戶）');
+  if (readUsers_().some(function (u) { return String(u.ymis || '') === String(o.ymis); })) {
+    return ok_({ duplicate: true, note: '呢個 YMIS 已經有戶口（唔使再申請）' });
+  }
+  return applyPush_('account', o, sanitizeLabel_(o.ymis));
+}
+/** 領袖決定（批／拒）：拒＝一定要有原因；批 account ＝ 回一張一次性邀請 token */
+function decideApplication(o) {
+  var rows = readTable_('申請'), i = rows.map(function (r) { return String(r.id); }).indexOf(String(o.id));
+  if (i < 0) return err_('no_app', '搵唔到呢張申請');
+  var decide = String(o.decide || '');
+  if (decide === 'reject') {
+    if (!String(o.reason || '').trim()) return err_('need_reason', '拒絕一定要寫原因（會通知申請人）');
+    rows[i].state = 'rejected'; rows[i].reason = String(o.reason).slice(0, 200);
+  } else if (decide === 'approve') {
+    rows[i].state = 'approved'; rows[i].reason = '';
+  } else return err_('bad_decide', "decide 只可以 approve／reject");
+  rows[i].decidedBy = actor_(); rows[i].decidedAt = stamp_();
+  var w = writeTable_('申請', rows, actor_());
+  if (!w.ok) return err_('write_fail', w.msg);
+  audit_(actor_(), decide === 'approve' ? '批准申請' : '拒絕申請', rows[i].id, rows[i].kind + (rows[i].reason ? '：' + rows[i].reason : ''), CTX.mode === 'server' ? 'api' : 'ui');
+  var out = { id: rows[i].id, kind: rows[i].kind, state: rows[i].state };
+  /* 批開戶：**批 ＝ 開戶或邀請連結**（照 BUILD §7） */
+  if (decide === 'approve' && rows[i].kind === 'account') {
+    var inv = createInvite({ role: 'member', branchId: rows[i].branchId, name: rows[i].name, email: rows[i].email });
+    if (inv.ok) { out.inviteToken = inv.token; out.inviteExpiresAt = inv.expiresAt; }
+    else out.inviteError = inv.msg;
+  }
+  return ok_(out);
+}
+/** 純邀請制開關（BUILD §7：領袖可改純邀請制） */
+function setApplyMode(o) {
+  var rows = readTable_('設定值').filter(function (r) { return String(r.id) !== 'applyMode'; });
+  var mode = o.mode === 'invite-only' ? 'invite-only' : 'open';
+  rows.push({ id: 'applyMode', value: mode, at: stamp_(), by: actor_() });
+  var w = writeTable_('設定值', rows, actor_());
+  audit_(actor_(), '改開戶申請模式', mode, mode === 'invite-only' ? '純邀請制（唔收自助申請）' : '開放申請', 'api');
+  return w.ok ? { ok: true, mode: mode } : { ok: false, msg: w.msg };
+}
+function readApplyMode_() {
+  var r = readTable_('設定值').filter(function (x) { return String(x.id) === 'applyMode'; })[0];
+  return r && r.value === 'invite-only' ? 'invite-only' : 'open';
 }
 /** 求救／問題回報**落旅 SHEET**（免登入都寫得：只可以 append，唔可以覆蓋其他人嘅單） */
 function saveRescue(o) {

@@ -11,6 +11,7 @@
 > ★ **分享只有兩樣**：通告（通告頁）＋ 活動（行事曆）。★ **支部版面旅側唔另設**：各支部自己設計，之後照抄入嚟（接入位見建構計劃 §6.7）。
 > ★ **入唔到就撳求救**：支部側（免登入）🆘 求救 → 旅部 ADMIN 喺「待辦與批核 → 🆘 求救」處理（**開返支部系統登入**／**重設密碼**／**答覆並結案**）。
 > 求救**唔會自動開任何嘢**（ADMIN 人手核實身份先做）；下一站係**平台超管**（唔靠下游登記 → **任何支部／模組都入得**，可以重設 ADMIN 密碼）。見建構計劃 §4.5.1。
+> 教材（跟版本走）：**[docs/教材/](docs/教材/README.md)** —— 角色快速入門 ×5／模組說明／示範旅引導任務／開旅 checklist／開戶與批核。
 > 施工前先讀 **[docs/旅系統建構計劃.md](docs/旅系統建構計劃.md)**（唯一施工規格）；
 > 想睇「功能係咪齊備」就開 **[docs/UI-示範導覽.md](docs/UI-示範導覽.md)**（逐個模組對照表）。
 
@@ -18,7 +19,7 @@
 
 ```bash
 npm run dev        # → http://localhost:8080/
-npm run check      # lint + 旅 GAS 本機測試（31）+ /api 測試（18）+ jsdom smoke（73）
+npm run check      # lint + 旅 GAS 本機測試（34）+ /api 測試（19）+ jsdom smoke（76）
 ```
 
 > 後端兩層：**旅 SHEET**（`apps-script/Code.gs`）＋**平台**（`api/proxy`／`auth`／`super`／`units`／`downstreams`／`troop`／`registry`／`member-entry`／`share`）。

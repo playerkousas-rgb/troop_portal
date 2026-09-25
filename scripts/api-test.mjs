@@ -94,6 +94,12 @@ t('proxy：破壞性 action 只有旅長做得（deleteRow／saveDbPart／purgeT
   ['resetPassword', 'deleteUser', 'setUserStatus', 'upsertUser'].forEach(a => assert(proxy.CHIEF_ONLY.includes(a), `${a} 應該係旅長專用`));
   assert(proxy.GAS_WHITELIST.includes('getTombstones') && !proxy.GAS_WHITELIST.includes('exportAll'), '墓碑讀得、匯出唔可以經前端');
 });
+t('proxy：申請批核／申請模式嘅權限（批核＝領袖、改政策＝旅長）', () => {
+  assert(proxy.LEADER_ACTIONS.includes('decideApplication'), '批核應該旅長／教練員都做得');
+  assert(proxy.CHIEF_ONLY.includes('setApplyMode'), '改開戶申請模式應該只旅長做得');
+  assert(proxy.GAS_WHITELIST.includes('decideApplication') && proxy.GAS_WHITELIST.includes('getApplyMode'), '批核／查模式要入白名單');
+  assert(!proxy.GAS_WHITELIST.includes('accountApply'), '自助申請唔應該經 proxy（免登入路徑自己經 GAS 匿名面）');
+});
 t('proxy：apikey 只喺 server 側（原始碼掃描）', async () => {
   const src = (await import('node:fs')).readFileSync(new URL('../api/proxy.js', import.meta.url), 'utf8');
   assert(/process\.env\[`TROOP_\$\{unit\}_APIKEY`\]/.test(src), 'apikey 應該只由 env 讀');

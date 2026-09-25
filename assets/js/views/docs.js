@@ -5,6 +5,19 @@ import { go } from '../lib/router.js';
 import { page, card, table, badge, notice, tabs, stat } from './ui.js';
 import { MODULES, GROUPS, moduleList, ROLE_LABEL } from '../lib/registry.js';
 
+/* 教材三層（BUILD §9）放喺 repo `docs/教材/`，跟版本走；下面係同 UI 一對一嘅對照表 */
+export const DOC_FILES = [
+  { who: '旅長', file: 'docs/教材/01-旅長.md', label: '旅長 · 快速入門' },
+  { who: '教練員', file: 'docs/教材/02-教練員.md', label: '教練員 · 快速入門' },
+  { who: '家長', file: 'docs/教材/03-家長.md', label: '家長（監護人）· 快速入門' },
+  { who: '支部人員', file: 'docs/教材/04-支部人員.md', label: '支部人員 · 快速入門' },
+  { who: '平台超管', file: 'docs/教材/05-平台超管.md', label: '平台超管 · 快速入門' },
+  { who: '全部', file: 'docs/教材/06-模組說明.md', label: '模組說明（跟模組註冊）' },
+  { who: '全部', file: 'docs/教材/07-示範旅引導任務.md', label: '示範旅（MOCK）引導任務' },
+  { who: '旅長', file: 'docs/教材/08-開旅-checklist.md', label: '開旅 checklist（A–F）' },
+  { who: '旅長', file: 'docs/教材/09-開戶與批核.md', label: '開戶與批核' }
+];
+
 export function render(el, params = {}, query = {}) {
   const d = S.load();
   if (params.id === 'blueprint') return renderBlueprint(el);
@@ -33,6 +46,10 @@ export function render(el, params = {}, query = {}) {
       cls: 'tbl compact', head: ['對象', '教材', '長度'],
       rows: docs.map(t => ({ cells: [badge(t.who, t.who === '全部' ? 'n' : 'b', true), esc(t.title), `${t.mins} 分鐘`] }))
     }) })}
+    ${card({ title: '教材檔案（跟版本走）', sub: '放喺 repo docs/教材/，同一份內容；改功能就一齊改', body: table({
+      cls: 'tbl compact', head: ['對象', '檔案', '對應'],
+      rows: DOC_FILES.map(f => ({ cells: [badge(f.who, f.who === '全部' ? 'n' : 'b', true), { text: f.file, cls: 'mono xs' }, esc(f.label)] }))
+    }) })}}
     `;
   } else if (tab === 'modules') {
     body = `${Object.entries(GROUPS).map(([gid, glabel]) => {
@@ -49,17 +66,19 @@ export function render(el, params = {}, query = {}) {
       });
     }).join('')}`;
   } else if (tab === 'checklist') {
-    body = `${card({ title: '開旅 checklist（新旅上線 7 步）', body: `<div class="steps">
+    body = `${card({ title: '開旅 checklist（A–F；全文 docs/教材/08-開旅-checklist.md）', body: `<div class="steps">
       ${[
-        '建旅 SHEET → 貼 <span class="mono">Code.gs</span> → 執行 <span class="mono">initializeSheets()</span> → 用精靈種入<b>第一個旅長</b>（EMAIL ＋ 臨時密碼）',
+        '建旅 SHEET → 貼 <span class="mono">Code.gs</span> → 執行 <span class="mono">initializeSheets()</span> → <span class="mono">seedFirstChief(email)</span> 攞 <b>12 字 setup token</b>（<b>唔會發臨時密碼</b>：密碼由網站用 PBKDF2 落 hash）',
         '部署 Web App（執行身分「我」、存取權「任何人」）→ Sheet 選單「🔗 旅系統 → 🔑 顯示 BACKEND／APIKEY」抄 B、D',
         '填 C（旅名）→ 旅閘「📋 新旅部署」交去 ADMIN 收件匣',
         'ADMIN：<span class="mono">data/units.json</span> 加 entry ＋ Vercel env <span class="mono">TROOP_&lt;旅ID&gt;_*</span> → Redeploy',
         '旅長登入 → 逐個支部「➕ 登記下游」（URL ＋ KEY ＋ 顯示名 ＋ <b>sig 用途字串</b>）→「📡 測試連線」',
         '逐個下游：搬舊數（下游吐 JSON 含 hash → 匯入）→ 核對筆數 → 「🚪 閂口」',
-        '之後開戶：成員由該團落筆（旅揀團經 sig）；領袖／家長由旅開；跨團幫手要目標團批'
+        '之後開戶：成員自助申請（YMIS ＋ 姓名 ＋ 聯絡 → 待批）或純邀請制；領袖／家長由旅開；跨團幫手要目標團批'
       ].map(s => `<div class="step"><div>${s}</div></div>`).join('')}
     </div>` })}
+    ${card({ title: '開戶申請模式', body: `${notice('兩條路：<b>自助申請</b>（成員入口免登入遞交 → 待批 → 領袖對名冊核對 → <b>批＝開戶或發邀請連結</b>；<b>拒＝一定要寫原因</b>）／<b>純邀請制</b>（只收邀請連結）。切換：用戶與身份 → 邀請。求救<b>唔受</b>呢個開關影響。詳見 docs/教材/09-開戶與批核.md。', 'info')}
+      <div class="btn-row"><a class="btn sm" href="#/users?tab=invites">去設定開戶申請模式</a><a class="btn sm" href="#/pending?kind=account">睇開戶申請</a></div>` })}
     ${card({ title: '首次登入會見到咩', body: `<ul class="doc">
       <li>頂部：旅名、你嘅角色、三色燈、「N 項未寫入」＋「儲存到後端」</li>
       <li>側邊：模組註冊表自動生成嘅導航（最多兩層）</li>
