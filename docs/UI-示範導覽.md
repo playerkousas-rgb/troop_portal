@@ -218,6 +218,7 @@ npm run smoke    # jsdom（55 場景）：旅閘四條身份路、8 個視角（
                  #        ★ 平台開旅：scripts/units.mjs（units.json ＋ env；檔永遠唔含 key／URL）
                  #        ★ 同步引擎：三色燈／樂觀鎖／merge3 逐格問（同格衝突唔自動揀）／batch serverTime 新者勝留底
                  #        ★ session 靜默刷新：剩 <10 分鐘自動續期（上限 8 小時）＋收到 401 續期一次再重試
+                 #        ★ 樂觀鎖：版本由 server 派；寫入帶 baseVersion，撞版＝conflict（自動重讀重合併一次）
                  #        ★ 移交：移出（TRANSFERRED_OUT tombstone）／套裝 sha256（canonical 欄序）／接收四道閘
                  #          （hash／transferId／冪等／撞號）／家長（同旅零改動 vs 轉旅停用＋邀請重開）
 npm run gas-test # 旅 GAS：假 Apps Script 環境 38 項（sig 防護／逐表自證／審計鏈／hash 唔外洩／帳號下限／限流／
@@ -227,5 +228,5 @@ npm run units -- list   # 平台開旅工具（data/units.json ＋ Vercel env �
 npm run check    # 以上全部
 ```
 
-現況（2026-09-26 · P4）：`lint` 全綠（56 檔 · 988 KB）、`smoke` **83/83**、旅 GAS 本機測試 **41/41**、`/api` 測試 **23/23**；
+現況（2026-09-26 · P5）：`lint` 全綠（56 檔 · 994 KB）、`smoke` **83/83**、旅 GAS 本機測試 **42/42**、`/api` 測試 **23/23**；
 教材（角色 ×5／模組／示範任務／開旅 checklist／開戶與批核）落 `docs/教材/`，UI「系統 → 教學」有同一份對照表。
