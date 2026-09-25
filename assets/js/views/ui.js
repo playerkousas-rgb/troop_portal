@@ -104,6 +104,29 @@ export function saveBar({ label = '儲存到後端', hint = '', count = 0, dirty
   </div>`;
 }
 
+/** 可收合區塊：電話友善，默認收埋（除非 open） */
+export function fold({ title, sub = '', body = '', open = false, badge = '', actions = '', id = '' }) {
+  return `<details class="fold" ${open ? 'open' : ''} ${id ? `id="${id}"` : ''}>
+    <summary>
+      <span class="fold-t">${esc(title)}</span>
+      ${badge ? `<span class="tag gold sm">${badge}</span>` : ''}
+      ${sub ? `<span class="fold-sub">${esc(sub)}</span>` : ''}
+      <span class="chev">${icon('chevD', 14)}</span>
+    </summary>
+    <div class="fold-body">
+      ${actions ? `<div class="btn-row mb-12 no-print">${actions}</div>` : ''}
+      ${body}
+    </div>
+  </details>`;
+}
+
+/** 一行過嘅細 chips（電話慳位） */
+export function chips(items) {
+  return `<div class="chips">${items.map(it => `<span class="chip-sm ${it.tone || ''}" ${it.href ? `data-href="${esc(it.href)}"` : ''}>
+    ${it.icon ? icon(it.icon, 12) : ''}<b>${it.v}</b><span class="k">${esc(it.k || '')}</span>${it.hint ? `<span class="hint-i">${esc(it.hint)}</span>` : ''}
+  </span>`).join('')}</div>`;
+}
+
 export function head(a, n = 1) { return `<div class="section-title"><h${n + 1}>${a}</h${n + 1}><div class="rule"></div></div>`; }
 
 export function lightBar(items) {

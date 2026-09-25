@@ -33,28 +33,28 @@ export const DEMO_BRANCHES = [
     id: 'vs0082', code: '0082', name: '深資童軍團', section: '深資童軍', color: '#7B2233',
     youth: 18, adults: 4, founded: '2012',
     leader: '張偉業', leaderEmail: 'cheung@demo.troop',
-    link: { state: 'green', purpose: 'vsbadge-troop-sig-v1', api: 'v1', localLogin: false, registeredAt: '2026-09-18', lastPing: '2026-09-25 07:40', backend: 'script.google.com/macros/s/AKfyc…VS/exec', note: '進度 leaf 已接駁，本地入口已閂' },
+    link: { state: 'green', purpose: 'vsbadge-troop-sig-v1', api: 'v1', localLogin: false, registeredAt: '2026-09-18', lastPing: '2026-09-25 07:40', testedAt: '2026-09-25 07:40', backend: 'script.google.com/macros/s/AKfyc…VS/exec', note: '進度 leaf 已接駁，本地入口已閂' },
     progressSource: 'vsbadge', hasPortal: true, publicRank: 2
   },
   {
     id: 'sc0082', code: '0082', name: '童軍團', section: '童軍', color: '#1d4e89',
     youth: 42, adults: 6, founded: '1978',
     leader: '李美儀', leaderEmail: 'lee@demo.troop',
-    link: { state: 'yellow', purpose: 'scportal-troop-sig-v1', api: 'v1', localLogin: true, registeredAt: '2026-09-22', lastPing: '2026-09-24 21:10', backend: 'script.google.com/macros/s/AKfy…SC/exec', note: '已登記，未閂本地入口（等下屬補 sig）' },
+    link: { state: 'yellow', purpose: 'scportal-troop-sig-v1', api: 'v1', localLogin: true, registeredAt: '2026-09-22', lastPing: '2026-09-24 21:10', testedAt: '2026-09-24 21:10', backend: 'script.google.com/macros/s/AKfy…SC/exec', note: '已登記，未閂本地入口（等下屬補 sig）' },
     progressSource: 'scoutbadge', hasPortal: true, publicRank: 1
   },
   {
     id: 'cs0082', code: '0082', name: '幼童軍團', section: '幼童軍', color: '#b58b00',
     youth: 36, adults: 5, founded: '1985',
     leader: '黃志強', leaderEmail: 'wong@demo.troop',
-    link: { state: 'green', purpose: 'cubsbadge-troop-sig-v1', api: 'v1', localLogin: false, registeredAt: '2026-09-20', lastPing: '2026-09-25 06:05', backend: 'script.google.com/macros/s/AKfy…CS/exec', note: '已接駁（cubsbadge 零回打版，待對齊）' },
+    link: { state: 'green', purpose: 'cubsbadge-troop-sig-v1', api: 'v1', localLogin: false, registeredAt: '2026-09-20', lastPing: '2026-09-25 06:05', testedAt: '2026-09-25 06:05', backend: 'script.google.com/macros/s/AKfy…CS/exec', note: '已接駁（cubsbadge 零回打版，待對齊）' },
     progressSource: 'cubsbadge', hasPortal: true, publicRank: 2
   },
   {
     id: 'gs0082', code: '0082', name: '小童軍團', section: '小童軍', color: '#2e8a52',
     youth: 28, adults: 4, founded: '1996',
     leader: '陳小萍', leaderEmail: 'chan@demo.troop',
-    link: { state: 'red', purpose: '', api: '', localLogin: true, registeredAt: '', lastPing: '—', backend: '', note: '未接駁（該團未起支部系統）' },
+    link: { state: 'red', purpose: '', api: '', localLogin: true, registeredAt: '', lastPing: '—', testedAt: '', backend: '', note: '未接駁（該團未起支部系統）' },
     progressSource: '', hasPortal: false, publicRank: 1
   },
   {
@@ -70,41 +70,81 @@ export const DEMO_BRANCHES = [
 export const DEMO_USERS = [
   {
     id: 'u-chief', role: 'chief', name: '陳大文', email: 'chief@demo.troop', phone: '9123 4567',
-    title: '旅長', branchAccess: ['*'], status: 'active', mustChangePw: false, at: '2026-08-30 10:00', lastLogin: '2026-09-25 07:30'
+    title: '旅長', anchor: '旅 SHEET', ageGroup: 'adult',
+    branchAccess: ['*'], status: 'active', mustChangePw: false, at: '2026-08-30 10:00', lastLogin: '2026-09-25 07:30'
   },
   {
-    id: 'u-lee', role: 'leader', name: '李美儀', email: 'leader@demo.troop', phone: '9234 5678',
-    title: '旅教練員（跨團）', branchAccess: ['sc0082', 'cs0082'], status: 'active', mustChangePw: false, at: '2026-09-01 14:20', lastLogin: '2026-09-24 21:05'
-  },
-  {
-    id: 'u-wong', role: 'leader', name: '黃志強', email: 'wong@demo.troop', phone: '9345 6789',
-    title: '旅秘書（幼童軍團領袖）', branchAccess: ['cs0082'], status: 'active', mustChangePw: false, at: '2026-09-02 09:10', lastLogin: '2026-09-23 19:40'
+    id: 'u-lee', role: 'coach', name: '李美儀', email: 'coach@demo.troop', phone: '9234 5678',
+    title: '教練員（跨團）', anchor: '旅 SHEET', ageGroup: 'adult', yearsService: 12,
+    branchAccess: ['sc0082', 'cs0082'], status: 'active', mustChangePw: false, at: '2026-09-01 14:20', lastLogin: '2026-09-24 21:05'
   },
   {
     id: 'u-parent', role: 'parent', name: '陳小萍', email: 'parent@demo.troop', phone: '9456 7890',
-    title: '家長', children: ['YMIS-2001', 'YMIS-2002'], branchAccess: [], status: 'active', mustChangePw: false, at: '2026-09-03 20:00', lastLogin: '2026-09-25 06:50'
+    title: '家長', anchor: '旅 SHEET', ageGroup: 'adult',
+    children: ['YMIS-2001', 'YMIS-2002'], branchAccess: [], status: 'active', mustChangePw: false, at: '2026-09-03 20:00', lastLogin: '2026-09-25 06:50'
+  },
+  {
+    id: 'u-b-leader', role: 'member', name: '鄭美玲', email: 'cs-leader@demo.troop', phone: '9567 1234',
+    title: '幼童軍團長', anchor: '幼童軍團 SHEET（cs0082）', ageGroup: 'adult',
+    branchId: 'cs0082', ymis: 'YMIS-2010', identity: '團長', branchAccess: ['cs0082'],
+    status: 'active', mustChangePw: false, at: '2026-09-02 09:10', lastLogin: '2026-09-24 20:15'
+  },
+  {
+    id: 'u-b-leader2', role: 'member', name: '黃志強', email: 'cs-deputy@demo.troop', phone: '9345 6789',
+    title: '幼童軍副團長', anchor: '幼童軍團 SHEET（cs0082）', ageGroup: 'adult',
+    branchId: 'cs0082', ymis: 'YMIS-2011', identity: '副團長', branchAccess: ['cs0082'],
+    status: 'active', mustChangePw: false, at: '2026-09-02 09:30', lastLogin: '2026-09-23 19:40'
+  },
+  {
+    id: 'u-m-exec', role: 'member', name: '郭嘉敏', email: 'vs-exec@demo.troop', phone: '9678 2345',
+    title: '深資童軍執委（主席）', anchor: '深資童軍團 SHEET（vs0082）', ageGroup: 'adult',
+    branchId: 'vs0082', ymis: 'YMIS-2006', identity: '執委', memberTitle: '主席',
+    branchAccess: ['vs0082'], perms: { note: '職稱「主席」默認跟管委權限；另加「可批准小額支出（$500 以下）」' },
+    status: 'active', mustChangePw: false, at: '2026-08-20 11:00', lastLogin: '2026-09-22 18:30'
+  },
+  {
+    id: 'u-m-adult', role: 'member', name: '陳家豪', email: 'vs-team@demo.troop', phone: '9789 3456',
+    title: '深資童軍（18+）', anchor: '深資童軍團 SHEET（vs0082）', ageGroup: 'adult',
+    branchId: 'vs0082', ymis: 'YMIS-2001', identity: '團隊長', branchAccess: ['vs0082'],
+    status: 'active', mustChangePw: false, at: '2026-09-10 16:00', lastLogin: '2026-09-21 17:20'
+  },
+  {
+    id: 'u-m-minor', role: 'member', name: '陳家欣', email: 'sc-cpl@demo.troop', phone: '',
+    title: '童軍副隊長（未夠 18）', anchor: '童軍團 SHEET（sc0082）', ageGroup: 'minor',
+    branchId: 'sc0082', ymis: 'YMIS-2002', identity: '副隊長', guardian: 'u-parent', guardianName: '陳小萍',
+    branchAccess: ['sc0082'], status: 'active', mustChangePw: false, at: '2026-09-12 15:00', lastLogin: '2026-09-20 16:05'
   },
   {
     id: 'u-parent2', role: 'parent', name: '林美好', email: 'lam@demo.troop', phone: '9567 8901',
-    title: '家長', children: ['YMIS-2003'], branchAccess: [], status: 'pending', mustChangePw: true, at: '2026-09-24 18:30', lastLogin: '—',
+    title: '家長', anchor: '旅 SHEET', ageGroup: 'adult',
+    children: ['YMIS-2003'], branchAccess: [], status: 'pending', mustChangePw: true, at: '2026-09-24 18:30', lastLogin: '—',
     pendingNote: '子女綁定待童軍團領袖確認'
   },
   {
-    id: 'u-retired', role: 'leader', name: '（前）旅司庫 鄭大強', email: 'cheng@demo.troop', phone: '—',
-    title: '前旅司庫', branchAccess: [], status: 'disabled', mustChangePw: false, at: '2024-05-01 09:00', lastLogin: '2026-06-30 12:00',
-    note: '已離任：key 已 rotate、權限已撤'
+    id: 'u-parent3', role: 'parent', name: '何太', email: 'ho@demo.troop', phone: '9111 2222',
+    title: '家長（監護人）', anchor: '旅 SHEET', ageGroup: 'adult',
+    children: ['YMIS-2004'], branchAccess: [], status: 'active', mustChangePw: false, at: '2026-09-05 20:30', lastLogin: '2026-09-19 21:10'
+  },
+  {
+    id: 'u-super', role: 'super', name: '平台超管', email: 'super@platform.local', phone: '—',
+    title: '平台管理員（超管）', anchor: '平台', ageGroup: 'adult', hidden: true,
+    branchAccess: ['*'], status: 'active', mustChangePw: false, at: '2026-01-01 00:00', lastLogin: '2026-09-01 03:00'
   }
 ];
 
 /** 名冊摘要（每支部）＋ 個別成員（示範用少量真名） */
 export const DEMO_MEMBERS = [
-  { ymis: 'YMIS-2001', name: '陳家豪', branchId: 'vs0082', identity: '成員', patrol: '—', dob: '2007-04-12', joined: '2019-09-01', status: 'ACTIVE' },
-  { ymis: 'YMIS-2002', name: '陳家欣', branchId: 'sc0082', identity: '成員', patrol: '黑豹小隊', dob: '2012-11-03', joined: '2022-09-01', status: 'ACTIVE' },
-  { ymis: 'YMIS-2003', name: '林浩然', branchId: 'sc0082', identity: '成員', patrol: '黑豹小隊', dob: '2011-06-20', joined: '2021-09-01', status: 'ACTIVE', pendingParent: 'u-parent2' },
-  { ymis: 'YMIS-2004', name: '何靜文', branchId: 'cs0082', identity: '成員', patrol: '黃六', dob: '2015-02-09', joined: '2024-09-01', status: 'ACTIVE' },
-  { ymis: 'YMIS-2005', name: '梁俊傑', branchId: 'rs0082', identity: '成員', patrol: '—', dob: '2005-08-15', joined: '2023-09-01', status: 'ACTIVE' },
-  { ymis: 'YMIS-2006', name: '郭嘉敏', branchId: 'vs0082', identity: '執委', patrol: '—', dob: '2006-01-30', joined: '2018-09-01', status: 'ACTIVE' },
-  { ymis: 'YMIS-2007', name: '黃子朗', branchId: 'gs0082', identity: '成員', patrol: '綠六', dob: '2018-07-07', joined: '2025-09-01', status: 'ACTIVE' }
+  { ymis: 'YMIS-2001', name: '陳家豪', branchId: 'vs0082', identity: '團隊長', title: '', patrol: '—', dob: '2007-04-12', joined: '2019-09-01', status: 'ACTIVE', account: 'u-m-adult' },
+  { ymis: 'YMIS-2002', name: '陳家欣', branchId: 'sc0082', identity: '副隊長', title: '', patrol: '黑豹小隊', dob: '2012-11-03', joined: '2022-09-01', status: 'ACTIVE', account: 'u-m-minor' },
+  { ymis: 'YMIS-2003', name: '林浩然', branchId: 'sc0082', identity: '團員', title: '', patrol: '黑豹小隊', dob: '2011-06-20', joined: '2021-09-01', status: 'ACTIVE', pendingParent: 'u-parent2' },
+  { ymis: 'YMIS-2004', name: '何靜文', branchId: 'cs0082', identity: '團員', title: '', patrol: '黃六', dob: '2015-02-09', joined: '2024-09-01', status: 'ACTIVE', guardian: 'u-parent3' },
+  { ymis: 'YMIS-2005', name: '梁俊傑', branchId: 'rs0082', identity: '執委', title: '秘書', patrol: '—', dob: '2005-08-15', joined: '2023-09-01', status: 'ACTIVE' },
+  { ymis: 'YMIS-2006', name: '郭嘉敏', branchId: 'vs0082', identity: '執委', title: '主席', patrol: '—', dob: '2006-01-30', joined: '2018-09-01', status: 'ACTIVE', account: 'u-m-exec' },
+  { ymis: 'YMIS-2007', name: '黃子朗', branchId: 'gs0082', identity: '團員', title: '', patrol: '綠六', dob: '2018-07-07', joined: '2025-09-01', status: 'ACTIVE', guardian: 'u-parent4' },
+  { ymis: 'YMIS-2008', name: '鄧小鳳', branchId: 'sc0082', identity: '隊長', title: '', patrol: '黑豹小隊', dob: '2013-03-21', joined: '2023-09-01', status: 'ACTIVE' },
+  { ymis: 'YMIS-2009', name: '曾俊宇', branchId: 'sc0082', identity: '團員', title: '', patrol: '—', dob: '2014-12-05', joined: '2024-09-01', status: 'TRANSFERRED_OUT' },
+  { ymis: 'YMIS-2010', name: '鄭美玲', branchId: 'cs0082', identity: '團長', title: '', patrol: '—', dob: '1991-05-18', joined: '2020-09-01', status: 'ACTIVE', adult: true, account: 'u-b-leader' },
+  { ymis: 'YMIS-2011', name: '黃志強', branchId: 'cs0082', identity: '副團長', title: '', patrol: '—', dob: '1985-09-02', joined: '2015-09-01', status: 'ACTIVE', adult: true, account: 'u-b-leader2' }
 ];
 
 /** 進度摘要（家長頁／支部卡用）。items：每項 {name, stage, at, by} */
@@ -246,17 +286,18 @@ export const DEMO_PUBLIC = {
 
 /** 帳號／權限：待批申請、邀請連結、跨團幫手 */
 export const DEMO_APPLICATIONS = [
-  { id: 'a-1', kind: 'account', name: '林美好', email: 'lam@demo.troop', ymis: '', note: '想綁定子女 YMIS-2003（林浩然，童軍團）', at: D(-1) + ' 18:30', state: 'pending', need: '該團領袖確認子女' },
-  { id: 'a-2', kind: 'helper', name: '李美儀', email: 'leader@demo.troop', fromBranch: 'cs0082', toBranch: 'gs0082', note: '幼童軍團長想兼幫小童軍團（本職領袖兼幫）', at: D(-2) + ' 15:00', state: 'pending', need: '目標團（小童軍團）領袖批' },
-  { id: 'a-3', kind: 'member', name: '阮小明', ymis: 'YMIS-2099', branchId: 'sc0082', note: '自行申請開戶（成員）', at: D(-3) + ' 09:20', state: 'pending', need: '該團領袖對名冊核對' },
+  { id: 'a-1', kind: 'account', name: '林美好', email: 'lam@demo.troop', ymis: '', note: '想綁定子女 YMIS-2003（林浩然，童軍團）', at: D(-1) + ' 18:30', state: 'pending', need: '該團團長確認子女' },
+  { id: 'a-2', kind: 'helper', name: '李美儀', email: 'coach@demo.troop', fromBranch: 'cs0082', toBranch: 'gs0082', note: '幼童軍團長想兼幫小童軍團（本職團長兼幫 → 目標團批）', at: D(-2) + ' 15:00', state: 'pending', need: '目標團（小童軍團）團長批' },
+  { id: 'a-3', kind: 'member', name: '阮小明', ymis: 'YMIS-2099', branchId: 'sc0082', note: '自行申請開戶（成員）', at: D(-3) + ' 09:20', state: 'pending', need: '該團團長對名冊核對' },
   { id: 'a-4', kind: 'account', name: '郭嘉敏', email: '', ymis: 'YMIS-2006', note: '深資童軍執委申請開戶', at: D(-6) + ' 20:10', state: 'approved', need: '', decidedBy: '張偉業', decidedAt: D(-5) + ' 10:00' },
   { id: 'a-5', kind: 'publish', name: '童軍團', branchId: 'sc0082', note: '上報公開項目「小隊露營相簿」俾旅公開頁', at: D(-1) + ' 11:00', state: 'pending', need: '旅長批准對外發佈' }
 ];
 
 export const DEMO_INVITES = [
-  { id: 'iv-1', kind: 'leader', role: '旅層領袖', email: '', token: 'TROOP-LEAD-7F3A9C2E', branchAccess: ['sc0082'], expires: D(1), used: false, createdBy: '陳大文', at: D(-1) + ' 09:00' },
+  { id: 'iv-1', kind: 'coach', role: '教練員', email: '', token: 'TROOP-COA-7F3A9C2E', branchAccess: ['sc0082'], expires: D(1), used: false, createdBy: '陳大文', at: D(-1) + ' 09:00' },
+  { id: 'iv-4', kind: 'member', role: '團員', email: '', token: 'TROOP-MEM-5C7D1F2A', branchId: 'gs0082', identity: '團員', branchAccess: ['gs0082'], expires: D(1), used: false, createdBy: '陳大文', at: D(-1) + ' 10:30' },
   { id: 'iv-2', kind: 'parent', role: '家長', email: 'lam@demo.troop', token: 'TROOP-PAR-2B8D4E6F', branchAccess: [], expires: D(-2), used: false, createdBy: '陳大文', at: D(-3) + ' 18:00' },
-  { id: 'iv-3', kind: 'leader', role: '支部領袖（童軍團）', email: 'newleader@demo.troop', token: 'TROOP-BRA-9A1C3E5G', branchAccess: ['sc0082'], expires: D(0), used: true, createdBy: '陳大文', at: D(-2) + ' 10:00', usedAt: D(-1) + ' 14:30' }
+  { id: 'iv-3', kind: 'member', role: '副團長', email: 'newdeputy@demo.troop', token: 'TROOP-MEM-9A1C3E5G', branchId: 'cs0082', identity: '副團長', branchAccess: ['cs0082'], expires: D(0), used: true, createdBy: '陳大文', at: D(-2) + ' 10:00', usedAt: D(-1) + ' 14:30' }
 ];
 
 /** 模組開關（TROOP_MODULES：模組 × 全旅／指定支部） */
@@ -267,7 +308,7 @@ export const DEMO_AUDIT = [
   { id: 'au-1', at: D(0) + ' 07:40', actor: '陳大文', role: '旅長', action: '測試下游連線', target: '深資童軍團（vs0082）', via: 'UI', detail: 'sig 驗證成功 · 12 read / 19 write action' },
   { id: 'au-2', at: D(-1) + ' 21:12', actor: '陳大文', role: '旅長', action: '閂下游直接入口', target: '樂行童軍團（rs0082）', via: 'sig', detail: 'ALLOW_LOCAL_LOGIN=false（下游回報 confirmed）' },
   { id: 'au-3', at: D(-1) + ' 18:31', actor: '（申請人）林美好', role: '家長', action: '提交開戶申請', target: '家長帳號', via: '公開頁', detail: '待該團領袖確認子女綁定' },
-  { id: 'au-4', at: D(-2) + ' 15:02', actor: '李美儀', role: '旅層領袖', action: '提交跨團幫手申請', target: '小童軍團', via: 'UI', detail: '等目標團領袖批（未生效）' },
+  { id: 'au-4', at: D(-2) + ' 15:02', actor: '李美儀', role: 'coach', identity: '', action: '提交跨團幫手申請', target: '小童軍團', via: 'UI', detail: '等目標團領袖批（未生效）' },
   { id: 'au-5', at: D(-3) + ' 21:15', actor: '張偉業', role: '支部領袖', action: '提交財務摘要', target: '深資童軍團 2026-09', via: '支部系統', detail: '旅已收（accepted）' },
   { id: 'au-6', at: D(-5) + ' 10:00', actor: '陳大文', role: '旅長', action: '為下游開戶', target: '深資童軍團（vs0082）郭嘉敏', via: 'sig', detail: '兩邊同一 hash · 首登強制改密碼' },
   { id: 'au-7', at: D(-6) + ' 08:05', actor: 'system', role: '系統', action: '後端實況檢查', target: '全旅', via: 'cron(示範)', detail: '5 個下游：3 綠 1 黃 1 紅' },
@@ -278,7 +319,7 @@ export const DEMO_ACCESS_LOG = [
   { id: 'ac-1', at: D(0) + ' 07:30', sub: 'chief@demo.troop', role: '旅長', event: 'LOGIN_OK', ip: '203.0.113.x' },
   { id: 'ac-2', at: D(0) + ' 06:50', sub: 'parent@demo.troop', role: '家長', event: 'LOGIN_OK', ip: '203.0.113.y' },
   { id: 'ac-3', at: D(0) + ' 06:12', sub: 'scout@demo.troop', role: '—', event: 'LOGIN_FAIL', ip: '198.51.100.z' },
-  { id: 'ac-4', at: D(-1) + ' 21:05', sub: 'leader@demo.troop', role: '旅層領袖', event: 'LOGIN_OK', ip: '203.0.113.x' },
+  { id: 'ac-4', at: D(-1) + ' 21:05', sub: 'coach@demo.troop', role: 'coach', event: 'LOGIN_OK', ip: '203.0.113.x' },
   { id: 'ac-5', at: D(-1) + ' 20:44', sub: 'cheung@demo.troop', role: '支部領袖', event: 'RESET', ip: '203.0.113.q' },
   { id: 'ac-6', at: D(-2) + ' 19:58', sub: 'parent@demo.troop', role: '家長', event: 'LOCKOUT', ip: '203.0.113.y' }
 ];
@@ -330,10 +371,11 @@ export const DEMO_AUTOMATIONS = [
 
 /** 教材（三層）＋ 四角色入口指引 */
 export const DEMO_TUTORIALS = [
-  { id: 'doc-1', who: '旅長', title: '旅長快速入門（首次登入必見）', mins: 6, steps: ['登入 → 睇儀表板四格（支部／連結／待辦／財務）', '去「支部」逐個測試連線，確認五個下游狀態', '「用戶與身份」發邀請連結開旅層領袖／家長', '「財務整合」每月審各支部提交（有問題可以退問）', '「系統」睇後端實況、審計、key rotate 提醒'] },
-  { id: 'doc-2', who: '旅層領袖', title: '旅層領袖快速入門', mins: 5, steps: ['登入 → 只見到你有 branch_access 嘅支部', '「通告」發旅通告時揀分享俾邊啲支部（要先有該模組）', '「行事曆」加旅活動，記住揀支部標籤', '「物資整合」批跨支部借用申請（路由去 owner）'] },
-  { id: 'doc-3', who: '家長', title: '家長快速入門', mins: 3, steps: ['收到邀請連結 → 設定密碼（首登強制改）', '「我的子女」睇進度／通告／繳費（跨支部自動併埋）', '通告頁免登入都可以回覆出席與否', '想加第二個子女 → 撳「新增子女」，等該團領袖確認'] },
-  { id: 'doc-4', who: '支部領袖', title: '支部領袖（你只用自己團）', mins: 4, steps: ['旅長發你嘅邀請連結 → 開戶', '你嘅主場喺自己支部系統（撳「支部」→ 進入）', '要旅系統幫手（開戶／搬數）→ 同旅長講', '本職領袖想兼幫其他團 → 提「跨團幫手申請」，等目標團批'] },
+  { id: 'doc-1', who: '旅長', title: '旅長快速入門（首次登入必見）', mins: 6, steps: ['旅閘 → 揀身份「旅長／教練員」→ 登入', '儀表板：撳開「需要你處理」「接駁狀態」（默認收合，電話好撳）', '「支部」逐個測試連線（未登記下游＝入唔到，紅字講明）', '「用戶與身份」發邀請：教練員／家長（旅層）、團長／副團長／成員（落該團）', '「財務整合」每月審各支部提交（有問題可以退問）', '「系統」睇後端實況、審計、模組開關、key rotate 提醒'] },
+  { id: 'doc-2', who: '教練員', title: '教練員快速入門（旅層帳號）', mins: 5, steps: ['旅閘 → 揀身份「旅長／教練員」→ 登入（帳號住旅 SHEET）', '只見到你有 branch_access 嘅支部', '「通告」發旅通告時揀分享俾邊啲支部（要先有該模組）', '「行事曆」加旅活動，記住揀支部標籤', '要幫多一個團（例：深資團長去協助童軍團）→ 跨團幫手申請，等目標團批'] },
+  { id: 'doc-3', who: '家長', title: '家長快速入門（監護人）', mins: 3, steps: ['收到邀請連結 → 設定密碼', '「我的子女」睇進度／通告／繳費（跨支部自動併埋）', '子女未夠 18 → 你係監護人：報名、借用、公開亮相都要你同意', '通告頁免登入都可以回覆出席與否（可代子女填）'] },
+  { id: 'doc-4', who: '支部人員', title: '團長／副團長／成員（先揀團）', mins: 4, steps: ['旅閘 → 揀身份「支部人員」→ 必須先揀團（旅要對得上該團下游先入得到）', '登入之後：我嘅身份卡、通告、行事曆；團長／副團長多一個「支部」入口', '你嘅密碼由自己團核對 —— 旅唔會、亦唔可以代驗', '成員未夠 18：要監護人（家長帳號）＋家長同意先報名／借物資', '本職團長想兼幫其他團 → 跨團幫手申請，等目標團批'] },
+  { id: 'doc-8', who: '支部人員', title: '身份／職稱／年齡組（一次睇清）', mins: 4, steps: ['身份：團長(5)／副團長(4)／管委(4)／執委(3)／隊長·副隊長·團隊長(3)／團員(2)', '職稱：主席／副主席／秘書／財務 —— 默認跟執委或管委，可以按人再微調', '年齡組：18+ 自己管自己；未夠 18 要監護人＋家長同意', '我嘅身份卡（#/mine）會列晒你嘅身份、年齡組、可見等級同做得到嘅事'] },
   { id: 'doc-5', who: '全部', title: '模組說明：通告 + 個人化訂閱 ★', mins: 4, steps: ['訂閱設定喺「通告 → 我嘅訂閱」：揀支部 × 分類', '設定存本機；命中即推，同一通告只推一次', '推送基建＝通告圖書館原有鏈（Supabase + 每日 06:00 notify）', '圖書館數據：知幾多人訂、訂咩，唔知邊個'] },
   { id: 'doc-6', who: '全部', title: '模組說明：財務整合', mins: 4, steps: ['支部用自己 key 簽提交月度摘要（明細留返支部）', '旅長只睇摘要 + 總收支／按支部／按月／按類別', '有疑問可以「退問」，支部改完再提交', '全部動作入 AUDIT_LOG，記 submittedBy'] },
   { id: 'doc-7', who: '全部', title: '開旅 checklist（新旅上線 7 步）', mins: 8, steps: ['建旅 SHEET → 貼 Code.gs → 初始化 → 種第一個旅長', '部署 Web App（執行身分我、存取權任何人）→ 抄 B / D', '填 C（旅名）→ 交 ADMIN 收件匣', 'ADMIN 加 units.json + Vercel env → Redeploy', '逐個支部「登記下游」→「測試連線」', '搬舊數（下游吐 JSON 含 hash → 匯入）→ 核對 → 閂口', '之後開戶一律由旅揀支部開'] }

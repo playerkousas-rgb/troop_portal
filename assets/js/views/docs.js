@@ -3,7 +3,7 @@ import { esc, icon, toast, copyText } from '../lib/util.js';
 import * as S from '../lib/store.js';
 import { go } from '../lib/router.js';
 import { page, card, table, badge, notice, tabs, stat } from './ui.js';
-import { MODULES, GROUPS, moduleList } from '../lib/registry.js';
+import { MODULES, GROUPS, moduleList, ROLE_LABEL } from '../lib/registry.js';
 
 export function render(el, params = {}, query = {}) {
   const d = S.load();
@@ -28,6 +28,7 @@ export function render(el, params = {}, query = {}) {
         <div class="btn-row mt-8"><button class="btn sm" data-copy-doc="${t.id}">複製成 checklist</button></div>`
       })).join('')}
     </div>
+    ${card({ title: '「教學」係咩？喺邊？', body: TEACH_FAQ })}
     ${card({ title: '全部角色教材', body: table({
       cls: 'tbl compact', head: ['對象', '教材', '長度'],
       rows: docs.map(t => ({ cells: [badge(t.who, t.who === '全部' ? 'n' : 'b', true), esc(t.title), `${t.mins} 分鐘`] }))
@@ -62,17 +63,18 @@ export function render(el, params = {}, query = {}) {
     ${card({ title: '首次登入會見到咩', body: `<ul class="doc">
       <li>頂部：旅名、你嘅角色、三色燈、「N 項未寫入」＋「儲存到後端」</li>
       <li>側邊：模組註冊表自動生成嘅導航（最多兩層）</li>
-      <li>儀表板：五格總覽 ＋「需要你處理」＋ 接駁狀態</li>
+      <li>儀表板：細 chips 一行 ＋ 全部區塊<b>默認收合</b>（電話都撳得順），撳一下先展開</li>
       <li>示範模式橫額：明確講「資料住呢部機、唔會送去後端」</li>
     </ul>` })}
     ${card({ title: '角色 × 職責對照', body: table({
       cls: 'tbl compact', head: ['角色', '帳號住邊', '主場'],
       rows: [
         { cells: ['旅長', '旅 SHEET', '全旅：接駁、模組開關、財務確認、公開資料、審計'] },
-        { cells: ['旅層領袖', '旅 SHEET ＋ branch_access', '旅通告／行事曆、跨支部物資、被授權支部'] },
-        { cells: ['支部領袖', '該團支部 SHEET', '自己團（支部系統）；要旅幫手就搵旅長'] },
-        { cells: ['家長', '旅 SHEET', '我的子女（跨支部進度／通告／繳費）'] },
-        { cells: ['成員', '該團支部 SHEET', '自己團成員入口（旅只做導流）'] }
+        { cells: ['教練員', '旅 SHEET ＋ branch_access', '旅通告／行事曆、跨支部物資、被授權支部（要幫多團＝目標團批）'] },
+        { cells: ['家長（監護人）', '旅 SHEET', '我的子女（跨支部進度／通告／繳費）；未成年子女嘅同意'] },
+        { cells: ['團長／副團長', '該團支部 SHEET', '自己團：名冊、接駁、財務摘要、內部通告（旅窗口只放行睇得到嘅）'] },
+        { cells: ['成員（18+ ／未夠 18）', '該團支部 SHEET', '自己紀錄同活動；未夠 18 要監護人＋家長同意'] },
+        { cells: ['平台超管（隱藏）', '平台', '開旅、接入、金鑰輪換；唔會喺任何名單出現'] }
       ]
     }) })}
     `;
@@ -88,15 +90,22 @@ export function render(el, params = {}, query = {}) {
   }));
 }
 
-const roleLabel = r => ({ chief: '旅長', leader: '旅層領袖', parent: '家長', member: '成員', guest: '訪客', super: '平台超管' }[r] || r);
+const roleLabel = r => ROLE_LABEL[r] || r;
+/** 「系統 → 教學」係咩？答：入到系統之後嘅內建教材（唯一教學入口）；旅閘冇教材（未登入唔會睇到角色指引）。 */
+const TEACH_FAQ = `「教學」喺邊出現？<b>只有一個入口</b>：登入之後 → 左邊導航「教學」（<span class="mono">#/docs</span>）。
+      旅閘（未登入）唔會有教學 —— 你未揀身份，唔知畀你睇邊份。呢個就係之前「系統教學 vs 其他教學」嘅分別：全部合成一個。
+      入面三層：① 每角色快速入門（旅長／教練員／家長／支部人員）② 每模組說明（跟模組註冊表）③ 開旅 checklist ＋ 功能藍圖。`;
 
 /* ---------------- 功能藍圖（睇「功能係咪齊備」） ---------------- */
 function renderBlueprint(el) {
   const P0 = [
     ['旅閘（揀旅、伺服器登記狀態、診斷、新旅申請接入）', '旅', '已做（UI）', 'b'],
-    ['登入（旅長／旅層領袖／家長）＋首次登入強制改密碼', '旅', '已做（UI）', 'b'],
+    ['登入分流：旅長／教練員／家長（旅帳號）＋ 支部人員一定要「先揀團」（未登記下游＝入唔到）', '旅', '已做（UI）', 'g'],
+    ['成員身份再分：18+ ／ 未夠 18（監護人＋家長同意）；身份（團長…團員）／職稱（主席…財務）／逐人微調', '旅', '已做（UI）', 'g'],
+    ['隱藏超管帳號（唔喺任何名單）＋ 平台接入收件匣／units／輪換', '平台', '已做（UI）', 'g'],
     ['成員入口導流（揀支部 → 轉去該團成員入口，密碼由團驗）', '旅', '已做（UI）', 'b'],
-    ['旅員管理（角色、branch_access、停用／復原、審計）', '旅', '已做（UI）', 'g'],
+    ['儀表板默認收合 ＋ 一行 chips（電話友善）', '旅', '已做（UI）', 'g'],
+    ['帳號管理（角色、branch_access、身份／職稱、逐人權限微調、停用／復原、審計）', '旅', '已做（UI）', 'g'],
     ['支部一頁（清單、顯示名、狀態、進入三路）', '旅', '已做（UI）', 'g'],
     ['下游登記／測試連線（sig）／入口掣／為下游開戶／匯出匯入 JSON', '旅', '已做（UI）', 'g'],
     ['公開資料（等級 0）＋分享連結／QR／公開頁', '旅', '已做（UI）', 'g'],
@@ -105,7 +114,7 @@ function renderBlueprint(el) {
   ];
   const P1 = [
     ['可見等級 0–5 全面落實（含「其他支部登記用戶」一級）', '旅', '已做（UI）', 'g'],
-    ['家長頁：子女跨支部摘要（進度／通告／活動／繳費）', '旅', '已做（UI）', 'g'],
+    ['家長頁：子女跨支部摘要（進度／通告／活動／繳費）＋ 監護人同意狀態', '旅', '已做（UI）', 'g'],
     ['旅通告（發佈、shareTo 分享、跨支部接收、公開頁報名、代填）', '旅', '已做（UI）', 'g'],
     ['★ 個人化訂閱（支部 × 分類；push 復用圖書館鏈；存本機）', '旅', '已做（UI 設定面）', 'g'],
     ['模組開關 TROOP_MODULES（全旅／指定支部；導航由註冊表生成）', '旅', '已做（UI）', 'g'],
@@ -133,7 +142,8 @@ function renderBlueprint(el) {
     ['通告推送基建（Supabase ＋ notify.py）', '圖書館（外部）', '旅只做訂閱設定前端']
   ];
   const TODO = [
-    ['成員登入路線：M3 導流（建議）定 M1 旅直接驗（要團加 verifyLogin）', '待你定案'],
+    ['成員登入路線：M3 導流（現行 UI 做法）。★ 你話「統一由旅登入」—— 但密碼一定要由該團 SHEET 驗（旅代驗＝要團加 verifyLogin）；詳見 docs 附錄', '待你定案'],
+    ['成員「先揀團」之後：要唔要旅記住佢個團（下次自動帶）？', '待你定案'],
     ['旅 ID 格式：4 位補零；同旅多支部＝多條 DOWNSTREAM_<id>', '建議照做'],
     ['家長綁定子女：由該團領袖確認（建議）定開放自助填', '待你定案'],
     ['整合數據新鮮度：cache 5 分鐘 ＋ 手動刷新（建議）', '建議照做'],
@@ -144,7 +154,7 @@ function renderBlueprint(el) {
   const body = `
   ${notice('呢一頁就係「功能係咪齊備」嘅清單。分三類：<b>旅做</b>（本系統）／<b>只跳轉</b>（用戶照樣去到，但主場係支部）／<b>唔做</b>（明確唔屬旅）。', 'info')}
   <div class="grid g4 mt-12">
-    ${stat({ k: '模組', v: MODULES.length, u: '個' })}
+    ${stat({ k: '模組', v: moduleList().filter(m => !m.hidden).length, u: '個（＋1 隱藏超管）' })}
     ${stat({ k: 'UI 已做', v: '第 1–2 期全部', tone: 'ok' })}
     ${stat({ k: '等團側', v: '1 項', hint: '真 sig 讀寫（路 S）' })}
     ${stat({ k: '等你定案', v: '6 項', tone: 'warn' })}

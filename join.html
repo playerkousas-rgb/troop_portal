@@ -11,6 +11,7 @@
 <div id="pub"></div>
 <script type="module">
 import { esc, icon, toast, todayISO, fmtDate } from './assets/js/lib/util.js';
+import { ageFromDob } from './assets/js/lib/registry.js';
 import * as S from './assets/js/lib/store.js';
 import { redeemInvite } from './assets/js/lib/auth.js';
 
@@ -20,7 +21,12 @@ const token = new URLSearchParams(location.search).get('t') || '';
 const inv = d.invites.find(i => i.token === token);
 const today = todayISO();
 
-const roleText = { leader: '旅層領袖（可以係旅部職位或者跨團教練）', parent: '家長（睇自己子女跨支部資料）' };
+const roleText = {
+  coach: '教練員（旅層帳號：可以係旅部職位或者跨團教練）',
+  leader: '教練員（旅層帳號）',
+  parent: '家長／監護人（睇自己子女跨支部資料）',
+  member: '支部人員（團長／副團長／成員 —— 帳號落喺該團支部 SHEET）'
+};
 
 function state() {
   if (!inv) return 'none';
@@ -76,12 +82,14 @@ if (st !== 'ok') {
       <div class="card-sub">由 ${esc(inv.createdBy || '旅長')} 發 · 到期日 ${esc(fmtDate(inv.expires))}</div>
       <div class="kv mt-12">
         <dt>帳號角色</dt><dd>${esc(roleText[inv.kind] || inv.role)}</dd>
-        <dt>帳號錨點</dt><dd>${inv.kind === 'parent' ? '旅 SHEET（家長帳號住旅）' : '旅 SHEET（領袖帳號住所屬層）'}</dd>
+        <dt>帳號錨點</dt><dd>${inv.kind === 'member' ? `該團支部 SHEET（${esc(S.branchName(inv.branchId))}）` : '旅 SHEET'}</dd>
+        ${inv.kind === 'member' ? `<dt>支部身份</dt><dd>${esc(inv.identity || '團員')}（默認可見等級跟身份）</dd>` : ''}
         <dt>可進入支部（branch_access）</dt><dd>${inv.branchAccess?.length ? inv.branchAccess.map(b => esc(S.branchName(b))).join('、') : '未指定（預設：按角色）'}</dd>
       </div>
       <div class="info-box">${icon('info', 15)}<div class="grow">
-        <b>領袖</b>：睇自己職責範圍；要幫另一個團（例：深資團長去協助童軍團）→ 提「跨團幫手申請」，由目標團批。<br>
-        <b>家長</b>：子女用 YMIS／SCOUT_ID 綁定，跨支部自動併埋；綁定要該團領袖確認（防亂認人仔）。
+        <b>教練員</b>（旅層）：睇 branch_access 授權嘅支部；要幫另一個團（例：深資團長去協助童軍團）→ 提「跨團幫手申請」，由目標團批。<br>
+        <b>家長／監護人</b>：子女用 YMIS／SCOUT_ID 綁定，跨支部自動併埋；綁定要該團團長確認（防亂認人仔）。<br>
+        <b>支部人員</b>（團長／副團長／成員）：帳號、密碼、名冊全部落喺該團支部 SHEET；旅只做導流，唔會、亦唔可以代驗你嘅密碼。
       </div></div>
     </div>
 
@@ -91,12 +99,17 @@ if (st !== 'ok') {
         <label class="f"><span class="lb">姓名</span><input type="text" id="jn-name" placeholder="李美儀"></label>
         <label class="f"><span class="lb">電郵（登入用）</span><input type="text" id="jn-email" value="${esc(inv.email || '')}" placeholder="you@example.hk"></label>
         <label class="f"><span class="lb">電話（選填）</span><input type="text" id="jn-phone" placeholder="9123 4567"></label>
-        ${inv.kind === 'parent' ? `<label class="f"><span class="lb">子女 YMIS／SCOUT_ID（可後補）</span><input type="text" id="jn-ymis" placeholder="YMIS-2003"></label>` : `<label class="f"><span class="lb">職位（選填）</span><input type="text" id="jn-title" placeholder="旅教練員 / 童軍團副團長"></label>`}
+        ${inv.kind === 'parent' ? `<label class="f"><span class="lb">子女 YMIS／SCOUT_ID（可後補）</span><input type="text" id="jn-ymis" placeholder="YMIS-2003"></label>` : ''}
+        ${inv.kind === 'member'
+      ? `<label class="f"><span class="lb">YMIS／SCOUT_ID（落名冊）</span><input type="text" id="jn-ymis2" placeholder="YMIS-2100"></label>
+         <label class="f"><span class="lb">生日（自動判 18+ ／未夠 18）</span><input type="date" id="jn-dob"></label>`
+      : `<label class="f"><span class="lb">職位（選填）</span><input type="text" id="jn-title" placeholder="教練員 / 旅部職位"></label>`}
         <label class="f"><span class="lb">密碼（至少 8 位）</span><input type="password" id="jn-pw" autocomplete="new-password"></label>
         <label class="f"><span class="lb">再打一次</span><input type="password" id="jn-pw2" autocomplete="new-password"></label>
       </div>
       <label class="check"><input type="checkbox" id="jn-pdpo"> 我明白個人資料按 PDPO 處理（只用於團務；離隊 12 個月後刪除或匿名化）</label>
-      ${inv.kind === 'parent' ? `<label class="check"><input type="checkbox" id="jn-consent"> 我同意子女嘅姓名、出生日期、進度及活動紀錄用於團務運作（家長同意）</label>` : ''}
+      ${inv.kind === 'parent' ? `<label class="check"><input type="checkbox" id="jn-consent"> 我同意子女嘅姓名、出生日期、進度及活動紀錄用於團務運作（家長同意）</label>
+      <label class="check"><input type="checkbox" id="jn-guardian"> 我係佢嘅監護人（子女未夠 18 時必填）</label>` : ''}
       <div class="btn-row mt-12">
         <button class="btn primary" id="jn-go">${icon('check', 14)} 開戶</button>
         <a class="btn" href="index.html?step=login">我已經有帳號</a>
@@ -116,12 +129,24 @@ if (st !== 'ok') {
     if (pw !== pw2) return toast('兩次密碼唔同', 'err');
     if (!root.querySelector('#jn-pdpo').checked) return toast('請確認 PDPO 條款', 'err');
     if (inv.kind === 'parent' && !root.querySelector('#jn-consent').checked) return toast('家長同意必填', 'err');
+    if (inv.kind === 'parent' && !root.querySelector('#jn-guardian').checked) return toast('請確認你係監護人', 'err');
+    if (inv.kind === 'member' && !root.querySelector('#jn-ymis2').value.trim()) return toast('支部人員要填 YMIS（落名冊）', 'err');
 
     const r = redeemInvite(token, { name, email, password: pw });
     if (!r.ok) return toast(r.msg, 'err');
     S.audit('邀請開戶', `${name}（${inv.role}）`, `token ${token.slice(-4)}…（示範）`);
 
     const ymis = root.querySelector('#jn-ymis')?.value.trim();
+    const ymis2 = root.querySelector('#jn-ymis2')?.value.trim();
+    if (ymis2) {
+      S.commit(dd => {
+        const u = dd.users.find(x => x.email === email);
+        if (u) { u.ymis = ymis2.toUpperCase(); u.ageGroup = root.querySelector('#jn-dob')?.value && ageOf(root.querySelector('#jn-dob').value) >= 18 ? 'adult' : 'minor'; }
+        if (!dd.members.some(m => m.ymis === ymis2.toUpperCase())) {
+          dd.members.push({ ymis: ymis2.toUpperCase(), name, branchId: inv.branchId, identity: inv.identity || '團員', status: 'ACTIVE', joined: todayISO(), dob: root.querySelector('#jn-dob')?.value || '' });
+        }
+      });
+    }
     if (ymis) {
       S.commit(dd => dd.applications.unshift({
         id: 'a-' + Date.now(), kind: 'account', name, email, ymis: ymis.toUpperCase(),
@@ -138,11 +163,12 @@ if (st !== 'ok') {
           <dt>角色</dt><dd>${esc(inv.role)}</dd>
           <dt>登入電郵</dt><dd><span class="mono">${esc(email)}</span></dd>
           ${ymis ? `<dt>子女綁定</dt><dd>${esc(ymis.toUpperCase())} <span class="tag y sm">待該團領袖確認</span></dd>` : ''}
-          <dt>帳號錨點</dt><dd>${inv.kind === 'parent' ? '旅 SHEET' : '旅 SHEET（領袖）'}</dd>
+          <dt>帳號錨點</dt><dd>${inv.kind === 'member' ? '該團支部 SHEET（' + esc(S.branchName(inv.branchId)) + '）' : '旅 SHEET'}</dd>
+          ${inv.kind === 'member' ? `<dt>支部身份</dt><dd>${esc(inv.identity || '團員')}</dd>` : ''}
         </div>
         <div class="info-box mt-12">${icon('info', 15)}<div class="grow">
-          下一步：撳「去登入」用你啱啱設定嘅密碼入旅系統。示範模式嘅示範密碼係 <span class="mono">demo1234</span>，
-          但你啱啱開嘅新帳號用你自己嘅密碼係登入唔到嘅（示範登入只認示範帳號）—— 呢個係示範環境嘅限制，真模式冇呢個問題。
+          下一步：撳「去登入」返旅閘，用你嘅身份入。<b>示範帳號</b>密碼一律 <span class="mono">demo1234</span>；
+          你呢個新帳號係示範環境嘅限制（示範登入只認示範帳號），真模式會即刻用得。
         </div></div>
         <div class="btn-row mt-12"><a class="btn primary" href="index.html?step=login&email=${encodeURIComponent(email)}">去登入</a>
         <a class="btn" href="public.html">睇公開資料</a></div>

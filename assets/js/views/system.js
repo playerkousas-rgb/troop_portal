@@ -3,7 +3,7 @@ import { esc, icon, toast, downloadFile, copyText, fmtDate, fmtStamp, relTime, m
 import * as S from '../lib/store.js';
 import { go } from '../lib/router.js';
 import { page, card, table, badge, notice, tabs, stat, kv, modal, empty, progressBar } from './ui.js';
-import { moduleList, GROUPS, visName } from '../lib/registry.js';
+import { moduleList, GROUPS, visName, ROLE_LABEL } from '../lib/registry.js';
 
 const TABS = [
   ['troop', '旅團設定'], ['modules', '模組開關'], ['backend', '後端實況'], ['audit', '審計與操作紀錄'],
@@ -57,7 +57,7 @@ export function render(el, params, query = {}) {
               cells: [
                 `<b>${esc(m.label)}</b><div class="xs faint">${esc(m.desc)}</div>${m.subs ? `<div class="xs faint">子頁：${m.subs.map(s => esc(s.label)).join('、')}</div>` : ''}`,
                 `<span class="tag n sm">${esc(m.tier)}</span>`,
-                m.roles.map(r => `<span class="tag n sm">${({ chief: '旅長', leader: '領袖', parent: '家長', member: '成員', guest: '訪客' })[r] || r}</span>`).join(' '),
+                m.roles.map(r => `<span class="tag n sm">${ROLE_LABEL[r] || r}</span>`).join(' '),
                 `<select data-mod="${m.id}">
                   <option value="all" ${mode === 'all' ? 'selected' : ''}>全旅開啟</option>
                   <option value="off" ${mode === 'off' ? 'selected' : ''}>全旅閂</option>
@@ -317,7 +317,7 @@ export function render(el, params, query = {}) {
 const CONSENT = `【個人資料收集同意書（家長同意）】
 1. 收集咩：子女姓名、出生日期、童軍編號（YMIS）、進度紀錄、參與活動紀錄，以及家長聯絡資料。
 2. 用途：團務運作、活動安排、進度考核、緊急聯絡。
-3. 邊個睇到：貴子女所屬支部領袖；旅長及旅層領袖經授權可看摘要；平台管理員只處理技術問題。
+3. 邊個睇到：貴子女所屬支部嘅團長／副團長；旅長及教練員經授權可看摘要；平台超管只處理技術問題。
 4. 保存：在役期間保存；離隊（TRANSFERRED_OUT／LEFT）後 12 個月刪除或匿名化。
 5. 查閱／改正：可隨時向團長要求查閱或改正。
 6. 查詢：請聯絡本旅旅長。`;

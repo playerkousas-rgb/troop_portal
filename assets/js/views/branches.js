@@ -251,7 +251,7 @@ export function openEnterBranch(id) {
   const u = S.currentUser();
   const dd = d.downstream[b.id] || {};
   const origin = location.origin;
-  const roleFor = { chief: 'group_leader', leader: 'branch_leader', parent: 'parent', member: 'member' }[S.getSession()?.role] || 'member';
+  const roleFor = { chief: 'troop_leader', coach: 'coach', parent: 'parent', member: 'branch_person' }[S.getSession()?.role] || 'branch_person';
   const portalUrl = dd.portalOrigin
     ? `${dd.portalOrigin}/?from=portal&u=${b.code}&role=${roleFor}&src=${encodeURIComponent(origin)}&ymis=${encodeURIComponent(u?.id || '')}&name=${encodeURIComponent(u?.name || '')}&embed=0`
     : '（該下游未設 portalOrigin，portal 路未開放）';
@@ -408,8 +408,8 @@ function openAccountFor(id) {
     title: `為下游開戶 · ${b.name}`,
     body: `
     ${notice('流程：① 旅本地開戶（角色權限、YMIS／Email 唯一性照舊）→ ② 讀回 <span class="mono">password_hash</span> → ③ <span class="mono">sig</span> 打下游 <span class="mono">upsertUser</span>。<b>兩邊同一個 hash</b>，同一個臨時密碼兩邊都啱用；首登仍然強制改密碼。', 'info')}
-    <label class="f mt-12"><span class="lb">身份</span><select id="oa-role"><option value="member">成員（SCOUT_ID／YMIS）— 只可以由該團落筆</option><option value="leader">領袖（EMAIL）</option></select></label>
-    <label class="f"><span class="lb">YMIS／Email</span><input type="text" id="oa-sub" placeholder="YMIS-2100 或 leader@example.hk"></label>
+    <label class="f mt-12"><span class="lb">身份</span><select id="oa-role"><option value="member">支部人員：成員／團長／副團長（SCOUT_ID／YMIS）— 只可以由該團落筆</option><option value="coach">教練員（EMAIL · 旅層）</option></select></label>
+    <label class="f"><span class="lb">YMIS／Email</span><input type="text" id="oa-sub" placeholder="YMIS-2100 或 coach@example.hk"></label>
     <label class="f"><span class="lb">姓名</span><input type="text" id="oa-name"></label>
     <label class="f"><span class="lb">臨時密碼</span><input type="text" id="oa-pw" value="1234"><div class="hint">首登強制改（≥4 位）。upsertUser 語義：帶明文密碼一律拒；一定要帶 64 位 hex hash。</div></label>
     <div class="warn-box">成員戶：旅唔會自己開 —— 呢一步係「經 sig 入該團落筆」，AUDIT 會記 <span class="mono">actor=旅長 via=sig</span>。</div>`,

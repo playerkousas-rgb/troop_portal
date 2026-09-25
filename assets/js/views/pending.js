@@ -1,4 +1,4 @@
-/* 待辦與批核 — 所有等旅長／旅層領袖拍板嘅事集中一頁 */
+/* 待辦與批核 — 所有等旅長／教練員拍板嘅事集中一頁（團內批核由團長喺自己支部做） */
 import { esc, icon, fmtDate, toast, promptDlg } from '../lib/util.js';
 import * as S from '../lib/store.js';
 import { go } from '../lib/router.js';
@@ -105,7 +105,15 @@ async function act(what, id, src) {
       const a = x.applications.find(y => y.id === id);
       if (a) { a.state = 'approved'; a.decidedBy = S.currentUser()?.name; a.decidedAt = new Date().toISOString().slice(0, 10); }
       if (a?.kind === 'account' && a.email) {
-        x.users.push({ id: 'u-' + Date.now(), role: a.ymis ? 'leader' : 'parent', name: a.name, email: a.email, phone: '', title: a.ymis ? '領袖' : '家長', branchAccess: [], children: [], status: 'active', mustChangePw: true, at: new Date().toISOString().slice(0, 16).replace('T', ' '), lastLogin: '—' });
+        const isBranchPerson = !!a.ymis;
+        x.users.push({
+          id: 'u-' + Date.now(), role: isBranchPerson ? 'member' : 'parent', name: a.name, email: a.email, phone: '',
+          title: isBranchPerson ? '支部人員' : '家長', branchId: isBranchPerson ? (a.branchId || '') : '',
+          ymis: isBranchPerson ? a.ymis : '', identity: isBranchPerson ? '團員' : '', ageGroup: 'minor',
+          anchor: isBranchPerson ? '該團支部 SHEET' : '旅 SHEET',
+          branchAccess: isBranchPerson && a.branchId ? [a.branchId] : [], children: [],
+          status: 'active', mustChangePw: true, at: new Date().toISOString().slice(0, 16).replace('T', ' '), lastLogin: '—'
+        });
       }
       if (a?.kind === 'helper') {
         const u = x.users.find(y => y.email === a.email);

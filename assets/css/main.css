@@ -266,6 +266,32 @@ legend { font-size: 13px; font-weight: 700; color: var(--ink-2); padding: 0 6px;
 .bar-track { height: 7px; background: var(--line-2); border-radius: 999px; overflow: hidden; flex: 1; }
 .bar-fill { height: 100%; background: var(--brand-5); }
 
+/* ---------- 收合區塊（電話友善：默認收埋） ---------- */
+.fold { border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); margin-bottom: 10px; box-shadow: var(--shadow-s); }
+.fold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 11px 14px; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold .fold-t { font-weight: 700; font-size: 15px; }
+.fold .fold-sub { font-size: 12px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fold .chev { margin-left: auto; color: var(--ink-3); transition: transform .15s; display: inline-flex; }
+.fold[open] .chev { transform: rotate(180deg); }
+.fold .fold-body { padding: 0 14px 14px; }
+.fold .card { box-shadow: none; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-sm { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 4px 10px; font-size: 13px; }
+.chip-sm b { font-weight: 800; }
+.chip-sm .k { color: var(--ink-3); font-size: 12px; }
+.chip-sm.warn b { color: var(--warn); }
+.chip-sm.ok b { color: var(--ok); }
+.chip-sm.danger b { color: var(--danger); }
+
+/* ---------- 導航分組（可收合；電話默認收埋） ---------- */
+.navgrp { margin-bottom: 2px; }
+.navgrp > summary { list-style: none; cursor: pointer; display: flex; align-items: center; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); margin: 12px 10px 2px; }
+.navgrp > summary::-webkit-details-marker { display: none; }
+.navgrp .chev { margin-left: auto; transition: transform .15s; display: inline-flex; }
+.navgrp[open] > summary .chev { transform: rotate(180deg); }
+@media (max-width: 700px) { .hide-sm { display: none !important; } .stat .v { font-size: 20px; } .main { padding: 12px 12px 90px; } }
+
 /* ---------- 教學 / 文件 ---------- */
 .doc h3 { margin-top: 18px; }
 .doc ol, .doc ul { padding-left: 22px; }

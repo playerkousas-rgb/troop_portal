@@ -205,7 +205,7 @@ function openEditor(id) {
   const d = S.load();
   const n = id ? d.notices.find(x => x.id === id) : null;
   const role = S.getSession()?.role;
-  const canTroop = role === 'chief' || (role === 'leader' && can(role, 'notice_publish'));
+  const canTroop = role === 'chief' || (role === 'coach' && can(role, 'notice_publish'));
   const targets = shareableTargets(d, 'notices');
   const m = modal({
     title: n ? '編輯通告' : '開一張通告',
@@ -214,7 +214,7 @@ function openEditor(id) {
     <label class="f"><span class="lb">標題</span><input type="text" id="ne-title" value="${esc(n?.title || '')}" placeholder="例：2026 旅露營（全旅）"></label>
     <div class="grid g3">
       <label class="f"><span class="lb">發佈層</span><select id="ne-scope" ${canTroop ? '' : 'disabled'}>
-        <option value="troop" ${n?.scope === 'troop' ? 'selected' : ''}>旅通告（旅長／旅層領袖）</option>
+        <option value="troop" ${n?.scope === 'troop' ? 'selected' : ''}>旅通告（旅長／教練員）</option>
         <option value="branch" ${n?.scope === 'branch' ? 'selected' : ''}>支部通告（本支部）</option>
       </select></label>
       <label class="f"><span class="lb">分類</span><input type="text" id="ne-cat" value="${esc(n?.category || '活動')}" list="ne-cats"><datalist id="ne-cats"><option value="活動"><option value="訓練"><option value="服務"><option value="比賽"><option value="會議"><option value="未分類"></datalist></label>

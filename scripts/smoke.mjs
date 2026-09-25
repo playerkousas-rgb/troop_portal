@@ -88,12 +88,69 @@ await test('登入：錯密碼要失敗，而且唔可以洩露帳號存在', as
   assert(r2.ok === false && r2.msg === r1.msg, '兩個錯誤訊息唔一致（會被枚舉帳號）');
 });
 
-await test('登入：四個示範帳號都入得', async () => {
+await test('登入：旅層帳號（旅長／教練員／家長）都入得', async () => {
   for (const l of A.DEMO_LOGINS) {
     const r = A.login(l.email, A.DEMO_PASSWORD);
     assert(r.ok, `${l.label} 登入失敗：${r.msg}`);
     assert(S.getSession().role === l.role, `${l.label} 角色唔啱`);
   }
+});
+
+await test('角色模型：冇「旅層領袖」；旅層只有旅長同教練員', async () => {
+  assert(!R.ROLE_LABEL.leader, '仲有 leader 角色');
+  assert(R.ROLE_LABEL.coach === '教練員', '教練員標籤唔啱');
+  assert(R.ROLE_LABEL.member === '支部人員', '支部人員標籤唔啱');
+  assert(R.ROLE_ANCHOR.member.includes('支部'), '支部人員帳號錨點唔啱');
+  assert(R.ROLE_ANCHOR.coach === '旅 SHEET' && R.ROLE_ANCHOR.parent === '旅 SHEET', '旅層錨點唔啱');
+});
+
+await test('身份／職稱：默認等級 ＋ 職稱跟執委／管委 ＋ 逐人微調', async () => {
+  assert(R.defaultRankFor('團長') === 5, '團長默認等級唔啱');
+  assert(R.defaultRankFor('團員') === 2, '團員默認等級唔啱');
+  assert(R.defaultRankFor('執委', '主席') === 4, '主席應該跟管委（4）');
+  assert(R.defaultRankFor('執委', '秘書') === 3, '秘書應該跟執委（3）');
+  assert(R.BRANCH_IDENTITIES.map(i => i.id).join(',') === '團長,副團長,管委,執委,隊長,副隊長,團隊長,團員', '身份清單唔啱');
+  const m = S.load().members.find(x => x.ymis === 'YMIS-2006');
+  m.perms = { rank: 5 };
+  assert(S.effectiveRank(m) === 5, '逐人微調冇生效');
+  delete m.perms;
+});
+
+await test('年齡組：18+ ／ 未夠 18 由生日自動判', async () => {
+  assert(R.ageGroupOf('2007-04-12') === 'adult', '2007 應該係 18+');
+  assert(R.ageGroupOf('2012-11-03') === 'minor', '2012 應該係未夠 18');
+  assert(R.ageGroupOf('') === 'minor', '冇生日要當未成年');
+  assert(R.ageFromDob('2011-06-20') > 13, '年齡計算唔啱');
+});
+
+await test('支部人員：未登記下游嘅團 ＝ 入唔到（誠實失敗）', async () => {
+  const r = A.branchEntryStatus('gs0082');       // 示範：紅燈（未接駁）
+  assert(r.ok === false && r.state === 'red', '紅燈支部竟然入得');
+  assert(r.msg.includes('未登記下游'), '錯誤訊息冇講清楚原因');
+  const g = A.branchEntryStatus('vs0082');       // 綠燈
+  assert(g.ok === true && g.state === 'green', '綠燈支部應該入得');
+  const y = A.branchEntryStatus('sc0082');       // 黃燈
+  assert(y.ok === true && y.state === 'yellow' && y.note.includes('未閂'), '黃燈應該入得但要提醒');
+  const hint = A.memberEntryHint('gs0082', 'YMIS-2007');
+  assert(hint.ok === false, 'memberEntryHint 冇跟住擋');
+});
+
+await test('超管：隱藏帳號唔喺名單、唔計數，但入得 platform', async () => {
+  const all = S.load().users;
+  const sup = all.find(u => u.id === A.SUPER_ID);
+  assert(sup && sup.role === 'super' && sup.hidden === true, '超管帳號冇設定好');
+  const list = S.visibleUsers();
+  assert(!list.some(u => u.role === 'super'), '超管出現喺名單');
+  const r = A.login(A.SUPER_EMAIL, A.DEMO_PASSWORD);
+  assert(r.ok && S.getSession().role === 'super', '超管登入失敗');
+  main.boot();
+  fireHash(w, '#/platform');
+  assert(document.getElementById('view').innerHTML.includes('接入收件匣'), '超管入唔到平台頁');
+  const nav = document.getElementById('nav').textContent;
+  assert(nav.includes('平台'), '超管導航冇「平台」');
+  assert(!nav.includes('財務整合'), '超管竟然見到旅層模組');
+  fireHash(w, '#/dashboard');                 // 超管撳「儀表板」→ 應該彈返平台，唔應該係「未授權」
+  assert(document.getElementById('view').innerHTML.includes('接入收件匣'), '超管儀表板冇彈返平台');
 });
 
 await test('Shell：旅長登入後見到導航、未寫入計數、儲存掣', async () => {
@@ -108,22 +165,27 @@ await test('Shell：旅長登入後見到導航、未寫入計數、儲存掣', 
 
 /* ---------- 每個角色 × 全部路由 ---------- */
 const ROUTES = [
-  'dashboard', 'pending', 'branches', 'branch/vs0082', 'notices', 'notice/n-1', 'calendar',
-  'finance', 'inventory', 'transfers', 'users', 'public', 'children', 'system', 'docs', 'docs/blueprint'
+  'dashboard', 'mine', 'pending', 'branches', 'branch/vs0082', 'notices', 'notice/n-1', 'calendar',
+  'finance', 'inventory', 'transfers', 'users', 'public', 'system', 'docs', 'docs/blueprint'
 ];
 const ROLE_ROUTES = {
-  chief: ROUTES.filter(r => r !== 'children'),          // 我的子女＝家長專頁（旅長唔會見到）
-  leader: ROUTES.filter(r => !['system', 'children'].includes(r)),
+  chief: ROUTES,
+  coach: ROUTES.filter(r => !['system'].includes(r)),
   parent: ['dashboard', 'branches', 'branch/vs0082', 'notices', 'notice/n-1', 'calendar', 'public', 'children', 'docs', 'docs/blueprint'],
-  member: ['dashboard', 'notices', 'notice/n-1', 'calendar', 'docs', 'docs/blueprint'],
+  member: ['dashboard', 'mine', 'branches', 'notices', 'notice/n-1', 'calendar', 'inventory', 'public', 'docs', 'docs/blueprint'],
+  branchLeader: ['dashboard', 'mine', 'branches', 'branch/cs0082', 'notices', 'calendar', 'inventory', 'public', 'docs', 'docs/blueprint'],
+  super: ['dashboard', 'platform', 'docs'],
   guest: ['docs']
 };
-const LOGIN_FOR = { chief: 'u-chief', leader: 'u-lee', parent: 'u-parent', member: 'u-parent' };
+const LOGIN_FOR = {
+  chief: 'u-chief', coach: 'u-lee', parent: 'u-parent',
+  member: 'u-m-minor', branchLeader: 'u-b-leader', super: 'u-super'
+};
 
 for (const [role, routes] of Object.entries(ROLE_ROUTES)) {
   const userId = LOGIN_FOR[role];
   await test(`路由（${role}）：${routes.length} 條路線都畫到嘢`, async () => {
-    if (role === 'chief' || role === 'leader' || role === 'parent') {
+    if (role !== 'guest') {
       const l = A.loginAs(userId);
       assert(l.ok, `${userId} 登入失敗`);
       if (l.mustChangePw) S.setSession({ ...S.getSession(), mustChangePw: false });
@@ -162,22 +224,23 @@ await test('登入閘：mustChangePw 帳號會被標記（強制改密碼）', a
 
 /* ---------- 全部 tab 直接 render ---------- */
 const TABS = {
+  mine: ['x'],
+  platform: ['inbox', 'units', 'keys'],
   branches: ['overview', 'link', 'members', 'finance', 'notices', 'calendar', 'inventory', 'progress', 'public'],
   notices: ['list', 'signup', 'subs', 'drafts'],
   calendar: ['month', 'list'],
   finance: ['overview', 'branch', 'troop', 'report'],
   inventory: ['list', 'loans', 'share'],
   transfers: ['pending', 'batch', 'history'],
-  users: ['list', 'invites', 'perms', 'applications'],
+  users: ['list', 'identities', 'invites', 'perms', 'applications'],
   public: ['troop', 'branches', 'share', 'preview'],
   system: ['troop', 'modules', 'backend', 'audit', 'automation', 'data', 'privacy', 'keys'],
   docs: ['start', 'modules', 'checklist']
 };
 
 await test('全部模組 × 全部子分頁都 render 到', async () => {
-  A.loginAs('u-chief');
-  main.boot();
   for (const [mod, tabs] of Object.entries(TABS)) {
+    A.loginAs(mod === 'platform' ? 'u-super' : mod === 'mine' ? 'u-m-minor' : 'u-chief');
     const view = await import(`../assets/js/views/${mod}.js`);
     const host = document.createElement('div');
     document.body.appendChild(host);
@@ -220,7 +283,55 @@ await test('路由守衛：角色唔啱會顯示未授權', async () => {
   A.loginAs('u-parent');
   main.boot();
   fireHash(w, '#/system');
-  assert(document.getElementById('view').innerHTML.includes('唔屬你嘅角色'), '家長竟然入得系統頁');
+  assert(document.getElementById('view').innerHTML.includes('唔屬你嘅身份範圍'), '家長竟然入得系統頁');
+  A.loginAs('u-m-minor');                    // 未夠 18 嘅副隊長：唔可以入系統、唔可以入平台
+  main.boot();
+  fireHash(w, '#/platform');
+  assert(document.getElementById('view').innerHTML.includes('唔屬你嘅身份範圍'), '支部人員竟然入得平台');
+  fireHash(w, '#/users');
+  assert(document.getElementById('view').innerHTML.includes('唔屬你嘅身份範圍'), '支部人員竟然入得帳號管理');
+});
+
+await test('支部人員導航：有「我的支部」，冇系統／用戶／財務／移交', async () => {
+  const hrefs = () => [...document.querySelectorAll('#nav a')].map(a => a.getAttribute('href'));
+  A.loginAs('u-m-minor');
+  main.boot();
+  let h = hrefs();
+  assert(h.includes('#/mine'), '支部人員冇「我的支部」');
+  for (const no of ['#/system', '#/users', '#/finance', '#/transfers', '#/pending', '#/platform']) {
+    assert(!h.includes(no), `支部人員竟然有「${no}」`);
+  }
+  A.loginAs('u-b-leader');                   // 團長：多一個「支部」
+  main.boot();
+  h = hrefs();
+  assert(h.includes('#/branches'), '團長冇支部入口');
+  assert(!h.includes('#/system'), '團長竟然有系統入口');
+  const t = document.getElementById('nav').textContent;
+  assert(t.includes('我的'), '導航冇分組標題');
+});
+
+await test('登入分流：旅閘有四條路（旅長／教練員、家長、支部人員先揀團、隱藏超管）', async () => {
+  S.clearSession();
+  globalThis.location.search = '?step=role';
+  main.boot();
+  const t = text();
+  assert(t.includes('你係邊個身份'), '冇揀身份頁');
+  assert(t.includes('旅長 ／ 教練員'), '冇旅層入口');
+  assert(t.includes('家長'), '冇家長入口');
+  assert(t.includes('先揀團') || t.includes('支部人員'), '冇支部人員入口');
+  assert(!t.includes('旅層領袖'), '仲有「旅層領袖」字眼');
+  // 支部人員：揀團頁要顯示邊個團入得、邊個唔入得
+  globalThis.location.search = '?step=branch';
+  main.boot();
+  const t2 = text();
+  assert(t2.includes('未登記下游'), '揀團頁冇顯示未登記嘅團');
+  assert(t2.includes('點解入唔到'), '冇「點解入唔到」掣');
+  // 超管：隱藏入口
+  globalThis.location.search = '?step=super';
+  main.boot();
+  assert(text().includes('隱藏入口'), '超管入口唔啱');
+  globalThis.location.search = '';
+  S.clearSession();
 });
 
 /* ============================================================
@@ -441,6 +552,7 @@ await test('互動掃描：每個模組／分頁所有掣撳一次（連 async h
   const errs = [];
   let clicks = 0;
   for (const [mod, tabs] of Object.entries(TABS)) {
+    A.loginAs(mod === 'platform' ? 'u-super' : mod === 'mine' ? 'u-m-minor' : 'u-chief');
     const view = await import(`../assets/js/views/${mod}.js`);
     const params = ['branches', 'branch'].includes(mod) ? { id: 'vs0082' } : {};
     for (const tab of tabs) {

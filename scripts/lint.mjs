@@ -113,7 +113,7 @@ const iconsBlock = utilSrc.slice(utilSrc.indexOf('const ICONS'), utilSrc.indexOf
 const ICONS = new Set([...iconsBlock.matchAll(/^\s{2}([A-Za-z]+):/gm)].map(m => m[1]));
 
 const seen = new Set();
-const validRoles = new Set(['chief', 'leader', 'parent', 'member', 'guest', 'super']);
+const validRoles = new Set(['chief', 'coach', 'parent', 'member', 'guest', 'super']);
 for (const m of registry.MODULES) {
   if (seen.has(m.id)) fail('模組 id 重複', m.id);
   seen.add(m.id);

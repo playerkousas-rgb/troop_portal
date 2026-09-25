@@ -9,6 +9,7 @@
 
 import { makeDemo } from './demo.js';
 import { deepClone, toast } from './util.js';
+import { defaultRankFor } from './registry.js';
 
 const K_DATA = 'troop.demo.db.v1';
 const K_SESSION = 'troop.session.v1';
@@ -103,10 +104,40 @@ export const memberByYmis = y => load().members.find(m => m.ymis === y) || null;
 export const currentUser = () => (session?.userId ? userById(session.userId) : null);
 export const isChief = () => session?.role === 'chief';
 export const isParent = () => session?.role === 'parent';
+export const isMember = () => session?.role === 'member';
+export const isCoach = () => session?.role === 'coach';
+export const isSuper = () => session?.role === 'super';
+
+/** 超管係隱藏帳號：唔會喺任何名單／計數出現 */
+export const visibleUsers = () => users().filter(u => !u.hidden);
+
+/** 支部人員（團長／副團長／成員）嘅所屬支部 */
+export const myBranchId = () => session?.branchId || null;
+export const myBranch = () => (session?.branchId ? branchById(session.branchId) : null);
+export const myIdentity = () => session?.identity || null;
+export const myTitle = () => session?.title || null;
+export const myMember = () => (session?.ymis ? memberByYmis(session.ymis) : null);
+export const isBranchLeader = () => ['團長', '副團長'].includes(session?.identity || '');
+
+/** 逐人權限微調：member.perms = { rank?, borrow?, publish?, notes? } */
+export function permsOf(member) {
+  const m = member || myMember();
+  return (m && m.perms) || {};
+}
+export function effectiveRank(member) {
+  const m = member || myMember();
+  if (!m) return viewerRank();
+  const override = Number((m.perms || {}).rank);
+  return Number.isFinite(override) && override > 0 ? override : defaultRankFor(m.identity, m.title);
+}
 
 export function canSeeBranch(b) {
+  if (!b) return false;
   if (!session) return false;
   if (session.role === 'chief') return true;
+  if (session.role === 'super') return true;
+  if (session.role === 'member') return session.branchId === b.id;          // 支部人員：只睇自己團
+  if (session.role === 'parent') return load().members.some(m => (currentUser()?.children || []).includes(m.ymis) && m.branchId === b.id);
   const u = currentUser();
   if (!u) return false;
   if (u.branchAccess?.includes('*')) return true;
@@ -123,10 +154,11 @@ export function childrenOf(u = currentUser()) {
   });
 }
 
-/** 可見等級過濾：viewerRank（0=公眾／未登入） */
+/** 可見等級過濾：viewerRank（0=公眾／未登入；支部人員按身份／職稱／逐人微調） */
 export function viewerRank() {
   if (!session) return 0;
-  return { chief: 5, leader: 4, parent: 3, member: 2, guest: 0 }[session.role] ?? 1;
+  if (session.role === 'member') return effectiveRank(myMember());
+  return { chief: 5, coach: 4, parent: 3, super: 5, guest: 0 }[session.role] ?? 1;
 }
 export function visiblePublic(items, rank = viewerRank()) {
   return (items || []).filter(it => Number(it.vis || 0) <= rank);
@@ -165,7 +197,7 @@ export function counters() {
     financeDue: (d.financeSubmits || []).filter(f => f.state === 'missing' || f.state === 'query').length,
     loanPending: (d.inventory || []).reduce((n, i) => n + (i.loans || []).filter(l => l.state === 'pending').length, 0),
     transferPending: (d.transfers || []).filter(t => t.state === 'pending').length,
-    usersPending: (d.users || []).filter(u => u.status === 'pending').length,
+    usersPending: (d.users || []).filter(u => u.status === 'pending' && !u.hidden).length,
     systemAlerts: (d.branches || []).filter(b => b.link.state !== 'green').length + (d.backend?.broken?.length || 0)
   };
 }
@@ -177,6 +209,10 @@ export function audit(action, target = '', detail = '', via = 'UI') {
   const p = n => String(n).padStart(2, '0');
   const at = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())} ${p(now.getHours())}:${p(now.getMinutes())}`;
   return commit(d => {
-    d.audit.unshift({ id: 'au-' + Date.now(), at, actor: u?.name || session?.email || '（訪客）', role: session?.role || 'guest', action, target, via, detail });
+    d.audit.unshift({
+      id: 'au-' + Date.now(), at, actor: u?.name || session?.email || '（訪客）',
+      role: session?.role || 'guest', identity: session?.identity || '', branchId: session?.branchId || '',
+      action, target, via, detail
+    });
   }, { markDirty: false, silent: true });
 }
