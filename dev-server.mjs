@@ -68,7 +68,25 @@ const server = createServer(async (req, res) => {
     });
   }
 
-  /* ---------- /api/*：後端唔存在（UI 先行） ---------- */
+  /* ---------- /api/*：真 handler（同 Vercel 同一支 code；env 唔齊嘅會誠實回 501／503） ----------
+     ★ 點解要咁做：本機 preview 都應該行**真**邏輯（唔係另一套），例如：
+       · /api/units            → 公開旅清單（唔使 env）＋ ?diag=1
+       · /api/downstreams      → 未設 TROOP_82_* env 就回 not_configured（唔會扮有）
+       · /api/auth、/api/super → 未設 SESSION_SECRET／SUPER_KEY 就誠實拒
+     只有 `issue` 例外（下面單獨處理）＝本機 sink，唔會真喺 ADMIN 開 TICK。 */
+  const API_ROUTES = { '/api/units': './api/units.js', '/api/downstreams': './api/downstreams.js', '/api/auth': './api/auth.js', '/api/super': './api/super.js' };
+  if (API_ROUTES[path]) {
+    try {
+      const mod = await import(API_ROUTES[path]);
+      console.log(`[api] ${req.method} ${path}${url.searchParams.toString() ? '?' + url.searchParams : ''} → 真 handler（本機）`);
+      return await mod.default(req, res);
+    } catch (e) {
+      console.log(`[api] ${path} 爆咗：${e?.message || e}`);
+      return json(res, 500, { success: false, error: String(e?.message || e), where: 'dev-server → ' + API_ROUTES[path] });
+    }
+  }
+
+  /* ---------- /api/*：其餘（UI 先行） ---------- */
   if (path.startsWith('/api/')) {
     const action = url.searchParams.get('action') || url.searchParams.get('a') || '';
     console.log(`[api] ${req.method} ${path}${action ? '?action=' + action : ''} → 501（UI 先行，未實作）`);
@@ -135,5 +153,5 @@ server.listen(PORT, HOST, () => {
   支部系統登入通道  旅長 → 支部 → 揀團 →「接駁與登記」→ 開／閂（閂咗＝支部系統唔可以自己登入）
   🆘 求救          入唔到 → index.html?step=rescue（免登入）→ 旅長「待辦與批核 → 🆘 求救」處理
                    開返支部系統登入／重設密碼／答覆並結案（示範：樂行團長求救、家長求救）`);
-  console.log(`/api/* 暫時回 501（UI 先行，後端未實作）\n  /api/proxy + action=issue → 本機 sink（log 對正合同嘅 payload；唔會真送 ADMIN）\n`);
+  console.log(`/api/* 現況（本機行真 handler）：\n  units／downstreams／auth／super → api/*.js（env 唔齊會回 not_configured，唔會扮成功）\n  proxy + action=issue          → 本機 sink（log 對正合同嘅 payload；唔會真送 ADMIN）\n  proxy + 旅 GAS action          → 未設 TROOP_<旅ID>_* env → 503 not_configured\n`);
 });

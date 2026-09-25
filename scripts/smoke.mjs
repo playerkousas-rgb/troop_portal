@@ -1062,6 +1062,30 @@ await test('示範模式：唔會嘗試連後端（冇 fetch 到任何網址）'
   assert(localStorage.getItem('troop.demo.db.v1').includes('"mode":"mock"'), '示範模式標記唔見咗');
 });
 
+await test('★ 本機 dev server 行真 /api handler（唔係另一套）：units／downstreams／auth／super', () => {
+  const src = readFileSync(join(ROOT, 'dev-server.mjs'), 'utf8');
+  ['/api/units', '/api/downstreams', '/api/auth', '/api/super'].forEach(p => assert(src.includes(`'${p}':`), `dev-server 冇路由去真 handler：${p}`));
+  assert(/mod\.default\(req, res\)/.test(src), '應該真係叫 Vercel 嘅 default handler');
+  assert(src.includes("'/api/proxy'"), 'proxy 路線唔見咗');
+});
+
+await test('★ 前端 ↔ 後端通道：示範模式一律唔發請求；真模式先會（唯一寫入掣）', async () => {
+  const API = await import('../assets/js/lib/api.js');
+  A.loginAs('u-chief');
+  assert(API.isLive() === false, '示範模式唔應該當自己 live');
+  /* 示範模式：任何 API 呼叫都即刻回 mock，唔會 fetch */
+  const calls = [API.login('a@b.c', 'x'), API.session(), API.saveTables({ 支部: [] }), API.gasAction('load', { table: '支部' }), API.getDownstreams(), API.pushToBackend()];
+  const rs = await Promise.all(calls);
+  rs.forEach(r => assert(r.ok === false && r.code === 'mock', '示範模式竟然當成功：' + JSON.stringify(r)));
+  /* 資料欄 ↔ 分頁名要同 Code.gs 對得上（寫錯就得一個表靜靜寫唔到） */
+  const gasSrc = readFileSync(join(ROOT, 'apps-script/Code.gs'), 'utf8');
+  Object.values(API.TABLE_MAP).forEach(t => assert(gasSrc.includes("'" + t + "'"), `TABLE_MAP 嘅「${t}」唔喺 Code.gs 分頁清單內`));
+  /* 唯一寫入掣：真模式先出 /api/proxy 嗰條路（示範模式唔會） */
+  const src = readFileSync(join(ROOT, 'assets/js/main.js'), 'utf8');
+  assert(/API\.isLive\(\)/.test(src) && /API\.pushToBackend\(\)/.test(src), '寫入掣冇接真模式');
+  assert(readFileSync(join(ROOT, 'assets/js/lib/api.js'), 'utf8').includes("fetch('/api/proxy'"), 'api.js 應該只經 /api/proxy');
+});
+
 /* ---------- 核心資料流（真係改到資料＋入審計） ---------- */
 async function renderView(mod, params, query) {
   const view = await import(`../assets/js/views/${mod}.js`);

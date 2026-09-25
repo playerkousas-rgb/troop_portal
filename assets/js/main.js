@@ -10,6 +10,7 @@
 import { esc, icon, toast, modal, confirmDlg, fmtStamp, normId } from './lib/util.js';
 import { loginRouteFor, loginRouteMeta, REPORT } from './lib/registry.js';
 import { sendAdminReport } from './lib/report.js';
+import * as API from './lib/api.js';
 import * as S from './lib/store.js';
 import { route, resolve, go, currentPath } from './lib/router.js';
 import { MODULES, GROUPS, moduleList, moduleAllowed, modulesForSession, moduleById, gateOfLink, gateMeta, RESCUE, rescueKindMeta } from './lib/registry.js';
@@ -651,6 +652,39 @@ function openSave() {
   const d = S.load();
   const n = S.dirtyCount();
   const tables = ['通告', '行事曆', '財務整合', '用戶', '公開資料', '物資'].slice(0, 3);
+
+  /* ★ 真模式：真係 POST /api/proxy（action=saveTables）→ 讀返自證 → 出示真收據 */
+  if (API.isLive()) {
+    const willWrite = Object.keys(API.changedTables());
+    modal({
+      title: '儲存到後端（唯一寫入掣）',
+      body: `${noticeBox('真模式：只寫<b>有改過</b>嘅表（逐表寫）→ 寫完<b>即刻讀返自證</b>；<span class="mono">confirmed:true</span> 先算成功。')}
+      <div class="kv mt-12">
+        <dt>模式</dt><dd>live（真後端）</dd>
+        <dt>寫入路線</dt><dd>POST /api/proxy → action=saveTables → 旅 SHEET</dd>
+        <dt>未寫入改動</dt><dd>${n} 項</dd>
+        <dt>會寫嘅表</dt><dd>${willWrite.length ? willWrite.map(t => `<span class="tag n sm">${esc(t)}</span>`).join(' ') : '—'}</dd>
+      </div>`,
+      footer: `<button class="btn" data-close>取消</button><button class="btn primary" data-do>${icon('upload', 14)} 確認寫入</button>`,
+      onMount: (dlg, close) => {
+        dlg.querySelector('[data-close]').onclick = close;
+        dlg.querySelector('[data-do]').onclick = async () => {
+          close(); toast('寫入中…', '');
+          const r = await API.pushToBackend();
+          const shown = { success: r.ok, confirmed: r.confirmed === true, ms: r.ms, wrote: r.wrote || {}, readBack: r.readBack || {}, fails: r.fails || [] };
+          if (!r.ok) shown.error = r.msg;
+          modal({
+            title: r.ok ? '寫入完成（已自證）' : '寫入失敗（改動留返本機）',
+            body: `<div class="mono-block">${esc(JSON.stringify(shown, null, 2))}</div>
+            <div class="xs faint mt-8">${r.ok ? '後端讀返自證齊 → 未寫入計數清零。' : '失敗＝唔會扮成功：改動原封不動留喺部機，可以再試。'}</div>`,
+            footer: `<button class="btn primary" onclick="this.closest('.mask').remove()">明白</button>`
+          });
+          paintNav(); render();
+        };
+      }
+    });
+    return;
+  }
   modal({
     title: '儲存到後端（唯一寫入掣）',
     body: `${noticeBox('真模式：只寫<b>有改過</b>嘅表（逐表寫）→ 寫完<b>即刻讀返自證</b> → 回 <span class="mono">{success:true, confirmed:true, reports}</span>。<br>示範模式：呢一步只係模擬收據，唔會發任何請求。')}

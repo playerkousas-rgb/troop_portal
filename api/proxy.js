@@ -13,9 +13,24 @@
      severity 白名單：低／中／高／緊急；亂填／陌生值 → 落「高」。
      ADMIN 側唔使改任何嘢：佢見 type:'issue' 就寫入「問題回報」表 ＋ Email 通知。
 
-   之後（P0）會加：action = login / troop / proxy:<action> → 旅 GAS /exec（inject apikey）。
+   ★ 已實作：action = '<gasAction>'（白名單）→ 轉發去旅 GAS `/exec`，server 側 inject apikey。
+     · 需要有效 session（HttpOnly cookie；除 'status' 之外）—— 前端永遠見唔到 apikey
+     · 4MB 上限、逾時、log 只記 metadata
+     · 未白名單／未設定 env → 501／503 誠實失敗（**唔會扮成功**）
    ============================================================ */
+import { verifySession } from './auth.js';
 export const config = { runtime: 'nodejs' };
+
+/** 可以經呢個 proxy 轉去旅 GAS 嘅 action（＝ Code.gs ACTIONS 對前端開放嘅子集） */
+export const GAS_WHITELIST = [
+  'status', 'dbInfo', 'load', 'loadTables', 'saveTables', 'saveTable',
+  'createInvite', 'listInvites', 'revokeInvite',
+  'getDownstreams', 'registerDownstream', 'testDownstream', 'updateDownstream', 'removeDownstream',
+  'setLocalLogin', 'getLoginMode', 'getLinkState', 'listModules', 'setModule',
+  'getSummary', 'getAuditLog', 'getAccessLog', 'saveAudit', 'logAccess'
+];
+/** 唔使 session 都讀得（只係健康／公開讀） */
+const PUBLIC_GAS = ['status'];
 
 const REPORT = {
   type: 'issue',
@@ -81,6 +96,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return send(res, 204, {});
   const at = new Date().toISOString();
   const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
+  const normUnit = v => String(v || '').trim().toUpperCase().replace(/^0+(?=\d)/, '');
 
   /* 收 body（Vercel Node runtime：預設已 parse JSON；保險起見兩種都食） */
   let body = req.body;
@@ -105,11 +121,52 @@ export default async function handler(req, res) {
     }
   }
 
+  /* ---------- action = 旅 GAS（白名單；server 側 inject apikey） ---------- */
+  if (GAS_WHITELIST.includes(action)) {
+    /* session 驗證（'status' 例外）→ 前端唔會、亦唔可以自己帶 key */
+    const secret = process.env.SESSION_SECRET || '';
+    const sess = verifySession(String(req.headers.cookie || '').split(';').map(x => x.trim()).find(x => x.startsWith('troop_session='))?.slice('troop_session='.length) || '', secret);
+    if (!PUBLIC_GAS.includes(action) && !sess) return send(res, 401, { success: false, error: '要登入（session 過期／未登入）', code: 'no_session' });
+
+    const unit = normUnit(body.unit || (sess && sess.unit) || '');
+    if (!unit) return send(res, 400, { success: false, error: '要 unit（旅 ID）' });
+    if (sess && sess.unit && normUnit(sess.unit) !== unit) return send(res, 403, { success: false, error: 'session 唔屬於呢個旅' });
+    if (rateLimited(ip)) return send(res, 429, { success: false, error: '做得好密（10 分鐘最多 6 次）—— 請等一等再試' });
+
+    const backend = process.env[`TROOP_${unit}_BACKEND`] || process.env[`TROOP_${String(unit).padStart(4, '0')}_BACKEND`] || '';
+    const apikey = process.env[`TROOP_${unit}_APIKEY`] || process.env[`TROOP_${String(unit).padStart(4, '0')}_APIKEY`] || '';
+    if (!backend || !apikey) {
+      return send(res, 503, { success: false, error: `未設定 TROOP_${unit}_BACKEND／_APIKEY（ADMIN 放 Vercel env）`, code: 'not_configured' });
+    }
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(backend)) {
+      return send(res, 503, { success: false, error: 'BACKEND 格式唔啱（要 /exec）', code: 'bad_backend' });
+    }
+    const payload = { ...(body.payload || {}), action };
+    if (sess) payload.asUser = sess.email;                       // Code.gs 嘅 mustChangePw 閘靠呢個
+    const t0 = Date.now();
+    try {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 20000);
+      const r = await fetch(backend, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, apikey }), redirect: 'follow', signal: ctl.signal });
+      clearTimeout(timer);
+      const text = await r.text();
+      if (text.length > 4 * 1024 * 1024) return send(res, 502, { success: false, error: '旅 SHEET 回應太大（>4MB）' });
+      let j = null; try { j = JSON.parse(text); } catch { /* 下面如實報 */ }
+      console.log(`[proxy] ${at} gas=${action} unit=${unit} ${r.status} ${Date.now() - t0}ms`);   // 只記 metadata
+      if (!j) return send(res, 502, { success: false, error: `旅 SHEET 回應唔係 JSON（HTTP ${r.status}）` });
+      return send(res, j.success === true ? 200 : (j.code === 'must_change_pw' ? 403 : 400), j);
+    } catch (e) {
+      const to = String(e?.name || '').includes('Abort');
+      console.log(`[proxy] ${at} gas=${action} unit=${unit} ${to ? 'timeout' : 'error'}`);
+      return send(res, 504, { success: false, error: to ? '旅 SHEET 逾時（20 秒）' : `連唔到旅 SHEET：${String(e?.message || e)}` });
+    }
+  }
+
   /* ---------- 其他 action：未實作 → 誠實失敗（唔會扮成功） ---------- */
   return send(res, 501, {
     success: false,
     error: `action='${action || '(none)'}' 未實作（UI 先行）`,
-    planned: ['issue（已實作）', 'login / logout', 'troop（聚合讀取）', 'proxy:<白名單 action> → 旅 GAS /exec'],
+    planned: ['登入 → /api/auth', '問題回報 issue → ADMIN 收件匣（已實作）', '旅 GAS action 白名單（已實作）'],
     note: 'apikey 只喺 server 側注入；前端、QR、URL 永不帶 key'
   });
 }

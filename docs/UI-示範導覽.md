@@ -174,12 +174,27 @@ App 內已經有一頁「**功能藍圖**」（教學 → 功能藍圖，或 `#/
 
 | 項目 | 狀態 | 幾時做 |
 |---|---|---|
-| `/api/*`（proxy、units、auth、super、downstreams） | 未做（dev server 老實回 501） | 下一階段（UI 檢完之後） |
-| 旅 `Code.gs`（白名單 action、ScriptLock、逐表寫自證、sig、掣、匯出匯入） | 未做 | 同上 |
-| 真 sig 讀寫（路 S） | UI 已模擬，等團側補 `handleSignedRequest` | 團側完成後切換 |
+| `/api/*`（proxy、units、auth、super、downstreams） | ✅ 已寫好 5 支（本機 10 項測試綠）；**未上真 Vercel** | 跟 [後端部署步驟](後端部署步驟.md) 放 env |
+| 旅 `Code.gs`（白名單 action、ScriptLock、逐表寫自證、sig、掣、匯出匯入） | ✅ 已寫好（本機 23 項測試綠）；**未上真 Sheet** | 同上 §1–§2 |
+| `/api/troop`（旅層聚合讀取）／`member-entry`／`share`／`registry` | 未做（P1；前端用 `load`／`loadTables` 已經行得） | P1 |
+| 真 sig 讀寫（路 S） | 旅側已實作；未同真下游對打 | 等團側補 `handleSignedRequest` |
 | 支部系統 403 頁嘅「🆘 求救」掣 | 屬團側（旅側 UI 同求救頁已做好） | 團側照抄一條連結（§4.5.1） |
-| 真密碼驗證（PBKDF2）、Drive 備份、平台排程 | 未做 | 同上 |
+| 真密碼驗證（PBKDF2 100k）／session | ✅ `api/auth.js` 已做（前端示範模式照舊 demo1234） | 真環境用 §3 設密碼 |
+| Drive 備份 | ✅ `Code.gs backupToDrive`（建立即 PRIVATE）；13 份輪替未做 | 排程屬平台側 |
+| 版本樂觀鎖／merge3／tombstone purge | 未做（而家＝ScriptLock＋讀返自證） | P1 |
 | 成員端（各團 `members.html`） | 屬各支部 repo | 各團自己 |
+
+## 5b. 真模式對接（P0 已寫好）
+
+`npm run dev` 起嘅**本機 server 會直接行真 handler**（唔係另一套）：`/api/units`（公開清單＋`?diag=1`）、
+`/api/downstreams`／`/api/auth`／`/api/super`（env 唔齊＝誠實回 `not_configured`，唔會扮有）；只有 `issue` 係本機 sink。
+
+| 件 | 位置 | 做咩 |
+|---|---|---|
+| 前端唯一寫入掣 | `assets/js/main.js` ＋ `assets/js/lib/api.js` | 真模式（`_mock` 冇咗）→ `POST /api/proxy action=saveTables`（**只寫有改嘅表**）→ 讀返自證 → 真收據；示範模式零 fetch |
+| 旅 SHEET | `apps-script/Code.gs` | router／apikey＋sig 雙通道／白名單／ScriptLock／逐表寫自證／審計鏈／限流／帳號下限／registry／出站 sig／匯出匯入 |
+| 平台 | `api/{proxy,auth,super,units,downstreams}.js` | proxy 白名單轉發（inject apikey）／PBKDF2 100k 登入／票據／公開清單 |
+| 部署 | [docs/後端部署步驟.md](後端部署步驟.md) | ADMIN 人手步驟 ＋ 12 項驗收清單 |
 
 ## 6. 自動驗證（你自己都跑到）
 
@@ -192,7 +207,10 @@ npm run smoke    # jsdom（55 場景）：旅閘四條身份路、8 個視角（
                  #        ★ 旅入口＝支部入口（登入即入自己支部）／超管隱藏／未登記下游擋住
                  #        ★ 求救制（免登入送出 → 旅側處理：開返閘／重設密碼／答覆結案；唔會自動做任何嘢）
                  #        ★ 超管唔經支部登記 → 任何支部／模組都入得（未登記／紅燈／閂咗都擋唔住）
+                 #        ★ 前端 ↔ 後端通道：示範模式一律唔發請求（`code:'mock'`）；表名同 Code.gs 分頁對得上
+npm run gas-test # 旅 GAS：假 Apps Script 環境 23 項（sig 防護／逐表自證／審計鏈／hash 唔外洩／帳號下限／限流）
+npm run api-test # /api：PBKDF2 100k／session 防篡改／票據防重放／白名單／唔外洩 apikey
 npm run check    # 以上全部
 ```
 
-現況：`lint` 全綠、`smoke` 57/57 通過、體積 679 KB（單檔最大 55 KB）。
+現況（2026-09-26）：`lint` 全綠（44 檔 · 796 KB）、`smoke` **67/67**、旅 GAS 本機測試 **23/23**、`/api` 測試 **10/10**。

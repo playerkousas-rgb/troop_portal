@@ -1,0 +1,6 @@
+{
+  "note": "平台 registry 嘅公開部分（旅 ID、名、支部數）。真正嘅 BACKEND／APIKEY 一律住 Vercel env（TROOP_<旅ID>_BACKEND／_APIKEY），唔會入呢個檔。",
+  "units": [
+    { "id": "82", "name": "第八十二旅", "nameEn": "82nd Group", "district": "香港", "branches": 5, "sections": ["小童軍", "幼童軍", "童軍", "深資童軍", "樂行童軍"] }
+  ]
+}
