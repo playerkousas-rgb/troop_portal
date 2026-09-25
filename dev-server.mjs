@@ -100,8 +100,14 @@ server.listen(PORT, HOST, () => {
   console.log(`→ http://localhost:${PORT}/          旅閘／登入／主介面`);
   console.log(`→ http://localhost:${PORT}/public.html  公開頁（免登入）`);
   console.log(`→ http://localhost:${PORT}/notice.html?n=n-1  通告分享連結示範`);
-  console.log(`→ http://localhost:${PORT}/join.html?t=TROOP-LEAD-7F3A9C2E  邀請開戶示範`);
+  console.log(`→ http://localhost:${PORT}/join.html?t=TROOP-COA-7F3A9C2E  邀請開戶示範（教練員）`);
   console.log(`→ http://localhost:${PORT}/borrow.html  物資借用（免登入）`);
-  console.log(`\n示範帳號（密碼一律 demo1234）：chief@demo.troop / leader@demo.troop / parent@demo.troop`);
+  console.log(`\n示範帳號（密碼一律 demo1234，按旅閘身份分流入）：
+  旅長／教練員  chief@demo.troop / coach@demo.troop
+  家長          parent@demo.troop
+  支部人員      cs-leader@demo.troop（團長）/ cs-deputy@demo.troop（副團長）
+                vs-exec@demo.troop（執委·主席）/ vs-team@demo.troop（團隊長·18+）
+                sc-cpl@demo.troop（副隊長·未夠 18）   ← 入之前要先揀團
+  超管（隱藏）  index.html?step=super  或旅閘撳 ⚜ 五下 → super@platform.local`);
   console.log(`/api/* 暫時回 501（UI 先行，後端未實作）\n`);
 });
