@@ -2,7 +2,9 @@
 
 > 香港童軍**旅系統**：整個生態嘅頂點（TROOP 層）。所有人由旅呢個窗口入，入到去先揀支部。
 >
-> **本輪狀態：UI 示範版已經開得＋後端 P0 已寫好**（`apps-script/Code.gs` ＋ `api/*.js`）；示範模式唔會發任何請求，真模式要跟 **[docs/後端部署步驟.md](docs/後端部署步驟.md)** 放 env 先通。
+> **本輪狀態：UI 示範版開得＋後端已經寫好**（旅 `apps-script/Code.gs` ＋ 平台 `api/*.js` **九支**）。
+> 示範模式唔會發任何請求；真模式要跟 **[docs/後端部署步驟.md](docs/後端部署步驟.md)** 放 env 先通。
+> ★ 離線優先：🟡 有未寫入／🔴 寫入有問題／🟢 同後端一致（`assets/js/lib/offline.js`）；撞版**唔會自動覆蓋**。
 >
 > ★ **旅入口＝你支部嘅入口**：揀啱團、登入 → 直接係你支部嘅世界，只多咗「其他支部 share 咗、並經你哋接收」嘅嘢。
 > ★ **分享收件方決定**：人哋 share 嚟嘅嘢，**你接收先會出現**；未接收只喺「分享中心 · 待接收」，退回會留紀錄。
@@ -16,10 +18,10 @@
 
 ```bash
 npm run dev        # → http://localhost:8080/
-npm run check      # lint + 旅 GAS 本機測試（23）+ /api 測試（10）+ jsdom smoke（67）
+npm run check      # lint + 旅 GAS 本機測試（31）+ /api 測試（18）+ jsdom smoke（73）
 ```
 
-> 後端兩層：**旅 SHEET**（`apps-script/Code.gs`）＋**平台**（`api/proxy`／`auth`／`super`／`units`／`downstreams`）。
+> 後端兩層：**旅 SHEET**（`apps-script/Code.gs`）＋**平台**（`api/proxy`／`auth`／`super`／`units`／`downstreams`／`troop`／`registry`／`member-entry`／`share`）。
 > 本機測試係假環境（唔會連真 Sheet／真 Vercel）—— **真環境要人手跑一次**，清單見部署步驟 §5。
 > 鐵律唔變：示範模式零 fetch；寫入只有一個掣（「儲存到後端」）；唔會扮成功。
 

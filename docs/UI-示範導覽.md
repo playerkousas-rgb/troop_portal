@@ -174,14 +174,16 @@ App 內已經有一頁「**功能藍圖**」（教學 → 功能藍圖，或 `#/
 
 | 項目 | 狀態 | 幾時做 |
 |---|---|---|
-| `/api/*`（proxy、units、auth、super、downstreams） | ✅ 已寫好 5 支（本機 10 項測試綠）；**未上真 Vercel** | 跟 [後端部署步驟](後端部署步驟.md) 放 env |
+| `/api/*` | ✅ 已寫好 **9 支**（proxy／auth／super／units／downstreams／troop／registry／member-entry／share；本機 17 項測試綠）；**未上真 Vercel** | 跟 [後端部署步驟](後端部署步驟.md) 放 env |
 | 旅 `Code.gs`（白名單 action、ScriptLock、逐表寫自證、sig、掣、匯出匯入） | ✅ 已寫好（本機 23 項測試綠）；**未上真 Sheet** | 同上 §1–§2 |
-| `/api/troop`（旅層聚合讀取）／`member-entry`／`share`／`registry` | 未做（P1；前端用 `load`／`loadTables` 已經行得） | P1 |
+| `/api/troop`（分層 cache 5／30 分鐘）／`member-entry`／`share`／`registry` | ✅ 已做（P1 · 2026-09-26） | 真環境實測 |
 | 真 sig 讀寫（路 S） | 旅側已實作；未同真下游對打 | 等團側補 `handleSignedRequest` |
 | 支部系統 403 頁嘅「🆘 求救」掣 | 屬團側（旅側 UI 同求救頁已做好） | 團側照抄一條連結（§4.5.1） |
 | 真密碼驗證（PBKDF2 100k）／session | ✅ `api/auth.js` 已做（前端示範模式照舊 demo1234） | 真環境用 §3 設密碼 |
 | Drive 備份 | ✅ `Code.gs backupToDrive`（建立即 PRIVATE）；13 份輪替未做 | 排程屬平台側 |
-| 版本樂觀鎖／merge3／tombstone purge | 未做（而家＝ScriptLock＋讀返自證） | P1 |
+| 版本樂觀鎖／backoff 重試／離線隊列 | ✅ `assets/js/lib/offline.js`（三色燈＋`baseVersion`＋唔自動覆蓋） | — |
+| 大庫分件／tombstone purge | ✅ `saveDbPart`／`deleteRow`＋`purgeTombstones`（90 日） | — |
+| merge3 欄位級合併 | 未做（而家逐表揀「用我嘅／用後端嘅」） | P2 |
 | 成員端（各團 `members.html`） | 屬各支部 repo | 各團自己 |
 
 ## 5b. 真模式對接（P0 已寫好）
@@ -213,4 +215,4 @@ npm run api-test # /api：PBKDF2 100k／session 防篡改／票據防重放／�
 npm run check    # 以上全部
 ```
 
-現況（2026-09-26）：`lint` 全綠（44 檔 · 796 KB）、`smoke` **67/67**、旅 GAS 本機測試 **23/23**、`/api` 測試 **10/10**。
+現況（2026-09-26 · P1）：`lint` 全綠（51 檔 · 867 KB）、`smoke` **73/73**、旅 GAS 本機測試 **31/31**、`/api` 測試 **18/18**。

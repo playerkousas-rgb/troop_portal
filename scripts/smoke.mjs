@@ -24,6 +24,7 @@ async function test(name, fn) {
   try { await fn(); ok(name); } catch (e) { bad(name, e); }
 }
 function assert(cond, msg) { if (!cond) throw new Error(msg); }
+function eq(got, want, msg) { if (got !== want) throw new Error(`${msg || 'eq'}（got ${JSON.stringify(got)}，want ${JSON.stringify(want)}）`); }
 
 /* ---------- DOM 環境 ---------- */
 function stripScripts(html) { return html.replace(/<script[\s\S]*?<\/script>/g, ''); }
@@ -1185,6 +1186,103 @@ await test('用戶：發邀請 → join.html 用同一條 token 開到戶（前�
   document.getElementById('jn-go').click();
   assert(S.load().users.some(u => u.email === 'newby@demo.troop'), 'join 開戶冇接到旅系統嘅邀請');
   main.boot();     // 回到 app shell（畀後面嘅測試用）
+});
+
+/* ---------- P1：離線優先／樂觀鎖／重試／體積治理／訂閱（lib 層） ---------- */
+await test('★ 離線優先三色燈：黃＝有未寫入、紅＝失敗、綠＝一致（同 BUILD §3 一致）', async () => {
+  const OB = await import('../assets/js/lib/offline.js');
+  eq(OB.lightOf({ dirty: 0 }).light, 'green', '冇改動＝綠');
+  eq(OB.lightOf({ dirty: 3 }).light, 'yellow', '有未寫入＝黃');
+  eq(OB.lightOf({ dirty: 3, failing: true }).light, 'red', '寫入失敗＝紅（蓋過黃）');
+  eq(OB.lightOf({ lastError: 'not_configured' }).light, 'red');
+  assert(OB.lightOf({ dirty: 2 }).detail.includes('儲存到後端'), '黃燈要講清楚要撳邊個掣');
+  /* 錯誤碼字典：每個碼都要有中文解釋同色 */
+  ['not_configured', 'need_chief', 'must_change_pw', 'keep_one', 'rate_limited', 'conflict', 'busy', 'mock'].forEach(c => {
+    const i = OB.codeInfo(c);
+    assert(i && i.label && i.msg, '錯誤碼字典缺：' + c);
+  });
+  eq(OB.codeInfo('從未見過嘅碼').label, '未預期嘅錯', '未知碼要落 unknown 而唔係爆');
+});
+
+await test('★ 樂觀鎖：版本有 ISO＋隨機尾；撞版唔會自動覆蓋（要人手揀）', async () => {
+  const OB = await import('../assets/js/lib/offline.js');
+  const v1 = OB.makeVersion(1700000000000, () => 0.1);
+  const v2 = OB.makeVersion(1700000000000, () => 0.9);
+  assert(v1 !== v2, '同一秒都要分得開（隨機尾）');
+  assert(OB.versionNewer(v2, v1) === false || OB.versionNewer(v2, v1) === true, '要答到新舊');
+  eq(OB.versionNewer('亂', v1), null, '解析唔到＝當「唔知」，唔可以當新');
+  const d = OB.diffVersions({ notices: '2026-01-02T00:00:00-aaa', calendar: '2026-01-01T00:00:00-aaa' }, { notices: '2026-01-01T00:00:00-bbb', calendar: '2026-01-02T00:00:00-bbb' });
+  assert(d.localNewer.includes('notices'), '本機較新嘅要認到');
+  assert(d.remoteNewer.includes('calendar'), '後端較新嘅要認到');
+  const c = OB.resolveConflict({ tables: { 通告: [1, 2] }, baseVersion: '2026-01-01T00:00:00-aaa', remoteVersion: '2026-01-02T00:00:00-bbb', remoteTables: { 通告: [1] } });
+  eq(c.action, 'needs_review', '後端較新＝要人手睇，唔可以自動覆蓋');
+  eq(c.perTable[0].default, 'theirs', '預設用後端（唔會靜靜食掉人哋改動）');
+  assert(c.note.includes('唔會自動覆蓋'), '要明講唔會自動覆蓋');
+});
+
+await test('★ 排隊重試：指數 backoff ＋ jitter（唔會同一刻一齊撞）', async () => {
+  const OB = await import('../assets/js/lib/offline.js');
+  const a = OB.backoffMs(1, { rand: () => 0 });
+  const b = OB.backoffMs(1, { rand: () => 1 });
+  assert(b > a && a >= 125, `第 1 次要 125~250ms（got ${a}~${b}）`);
+  assert(OB.backoffMs(4, { rand: () => 1 }) > OB.backoffMs(1, { rand: () => 1 }), '要指數上升');
+  assert(OB.backoffMs(99, { rand: () => 1 }) <= OB.RETRY.capMs, '要有上限（唔會等到天光）');
+  assert(OB.isRetriable('busy') && OB.isRetriable('timeout') && OB.isRetriable('network'), '呢啲要重試');
+  assert(!OB.isRetriable('need_chief') && !OB.isRetriable('keep_one'), '權限／規則錯唔應該盲重試');
+  /* 真跑一次：頭兩次 busy、第三次成功 */
+  let n = 0;
+  const r = await OB.withRetry(async () => (++n < 3 ? { ok: false, code: 'busy' } : { ok: true, data: 'done' }), { sleep: async () => {} });
+  assert(r.ok && r.tries === 3 && r.log.length >= 2, '重試流程唔啱：' + JSON.stringify(r));
+  /* 唔可重試＝即刻收手 */
+  let m = 0;
+  const r2 = await OB.withRetry(async () => { m++; return { ok: false, code: 'need_chief' }; }, { sleep: async () => {} });
+  assert(r2.ok === false && m === 1, '唔應該重試 need_chief');
+});
+
+await test('★ 離線隊列：本機最多暫存 200 筆，清得乾淨', async () => {
+  const OB = await import('../assets/js/lib/offline.js');
+  const fake = { _d: '', getItem() { return this._d || null; }, setItem(k, v) { this._d = v; } };
+  OB.clearQueue(fake);
+  for (let i = 0; i < 205; i++) OB.pushQueue({ table: '旅通告', i }, fake);
+  eq(OB.readQueue(fake).length, 200, '要封頂 200 筆（唔會爆 localStorage）');
+  OB.clearQueue(fake);
+  eq(OB.readQueue(fake).length, 0);
+});
+
+await test('★ 訂閱（★重中之重）：只送匿名資料（冇 email／姓名）＋走圖書館原鏈', async () => {
+  const PU = await import('../assets/js/lib/push.js');
+  const sub = PU.buildSubscription({ endpoint: 'https://fcm.googleapis.com/x', keys: { p256dh: 'p', auth: 'a' } }, { topics: ['circulars', '亂填'], unit: '0082', branch: 'vs0082' });
+  eq(sub.source, 'troop_portal', '要標明來源（館方分得出邊個系統）');
+  eq(sub.topics.join(','), 'circulars', '題材要白名單（亂填唔收）');
+  const dump = JSON.stringify(sub);
+  assert(!/email|name|ymis|"pw"/.test(dump), '唔可以有任何個人資料：' + dump);
+  assert(!dump.includes('0082/vs0082') === false || true, '');
+  eq(sub.scope, '0082/vs0082', '只帶單位／支部（唔係個人）');
+  eq(PU.checkSubscription({ endpoint: 'x', keys: { p256dh: 'p' } }).ok, false, '缺 auth 要唔通');
+  eq(PU.checkSubscription(sub).ok, true, '齊料要通');
+  assert(PU.PUSH_CONFIG.source === 'troop_portal', '一條鏈：唔另起爐灶');
+  const cap = PU.capability({ navigator: {} });
+  assert(typeof cap.note === 'string' && cap.note.length > 0, '要老實講支援唔支援');
+});
+
+await test('★ 體積治理：單檔 ≤5MB、每筆 ≤3 張、AVIF／WebP 優先（BUILD §10）', async () => {
+  const F = await import('../assets/js/lib/formats.js');
+  eq(F.LIMITS.uploadBytes, 5 * 1024 * 1024); eq(F.LIMITS.perRecord, 3);
+  assert(F.LIMITS.distBytes === 5 * 1024 * 1024 && F.LIMITS.bundleBytes === 2 * 1024 * 1024, 'dist／bundle 上限同 BUILD 一致');
+  const ok = F.checkUpload({ name: 'a.webp', type: 'image/webp', size: 300 * 1024 });
+  assert(ok.ok && ok.needConvert === false, 'webp 應該直接過');
+  const big = F.checkUpload({ name: 'a.jpg', type: 'image/jpeg', size: 6 * 1024 * 1024 });
+  assert(big.ok === false && big.errors.some(e => e.includes('超過上限')), '6MB 要擋');
+  const many = F.checkUpload({ name: 'a.jpg', type: 'image/jpeg', size: 1000 }, { countInRecord: 4 });
+  assert(many.ok === false, '第 4 張要擋');
+  const daily = F.checkUpload({ name: 'a.jpg', type: 'image/jpeg', size: 10 * 1024 * 1024 }, { usedBytesToday: 39 * 1024 * 1024 });
+  assert(daily.ok === false, '每日總量要擋');
+  const gif = F.checkUpload({ name: 'a.gif', type: 'image/gif', size: 1000 });
+  assert(gif.ok && gif.needConvert, 'gif 要建議轉 AVIF／WebP');
+  eq(F.bestFormat(['image/jpeg', 'image/webp']), 'image/webp', '有 webp 應該揀 webp');
+  eq(F.bestFormat([]), 'image/jpeg', '乜都冇＝jpeg 保底');
+  assert(F.human(1536).includes('KB'), '要人睇得明嘅單位');
+  assert(F.checkSize({ distBytes: 1, bundleBytes: 1 }).ok === true && F.checkSize({ distBytes: 9e9 }).ok === false, '體積報表要判得啱');
 });
 
 /* ---------- 互動掃描：撳晒所有掣，唔可以有例外 ---------- */

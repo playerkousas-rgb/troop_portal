@@ -29,7 +29,18 @@ var LINK_SIG_PURPOSE = 'troopportal-troop-sig-v1';
 var SUPER_VERIFY_URL = 'https://troop-portal.vercel.app/api/super';
 
 /** 每次寫入上限（B／D 唔落 Sheet，所以只係防呆） */
-var LIMITS = { body: 900 * 1024, rowsPerWrite: 20000, importRows: 2000, loginFails: 5, lockMs: 15 * 60 * 1000, sigSkewMs: 5 * 60 * 1000 };
+var LIMITS = { body: 900 * 1024, rowsPerWrite: 20000, importRows: 2000, loginFails: 5, lockMs: 15 * 60 * 1000, sigSkewMs: 5 * 60 * 1000, anonWrites: 3, anonWindowSec: 3600 };
+
+/** 匿名可寫面（BUILD §10-5）：**只可以 append、有數量上限**；其他一律要 apikey／sig */
+var ANON_WRITE_ACTIONS = ['saveRescue'];
+
+/** 匿名寫入限流：同一 IP 每個鐘最多 3 單（CacheService；超額＝誠實拒） */
+function anonQuotaOk_(ip) {
+  var k = 'anonw_' + ip, n = Number(cache_().get(k) || 0);
+  if (n >= LIMITS.anonWrites) return { ok: false, used: n };
+  cache_().put(k, String(n + 1), LIMITS.anonWindowSec);
+  return { ok: true, used: n + 1 };
+}
 
 /** 泛用表（每個一張分頁；每行 = 一筆 JSON，header 固定） */
 var TABLES = [
@@ -65,10 +76,12 @@ var ACTIONS = ['status', 'dbInfo', 'load', 'loadTables', 'saveTables', 'saveTabl
   'getCalendar', 'getPublicProfile', 'getApplications', 'getConfig', 'getSummary', 'getAuditLog',
   'save', 'importUsers', 'upsertUser', 'addMember', 'bulkAddUsers', 'updateUserProfile', 'updateUserRole',
   'updatePermissions', 'resetPassword', 'setUserStatus', 'deleteUser', 'saveNotice', 'saveFinanceEntry',
+  'registry', 'setUnitStatus', 'saveShare', 'saveRescue',
   'changePassword', 'createInvite', 'redeemInvite', 'listInvites', 'revokeInvite',
   'getDownstreams', 'registerDownstream', 'testDownstream', 'updateDownstream', 'removeDownstream', 'setDownstreamApi',
   'setLocalLogin', 'openAccountForDownstream', 'listModules', 'setModule', 'exportAll', 'importAll',
-  'saveAudit', 'logAccess', 'getAuditLog', 'getAccessLog', 'purgeOldLogs', 'backupToDrive', 'setupWithToken'];
+  'saveAudit', 'logAccess', 'getAuditLog', 'getAccessLog', 'purgeOldLogs', 'backupToDrive', 'setupWithToken',
+  'registry', 'setUnitStatus', 'saveShare', 'saveRescue', 'deleteRow', 'getTombstones', 'saveDbPart', 'purgeTombstones'];
 
 /** 需要 apikey（＝server 側）嘅敏感 action */
 var SERVER_ONLY = ['authUser', 'dbInfo', 'exportAll', 'importAll', 'backupToDrive', 'purgeOldLogs'];
@@ -227,6 +240,44 @@ function randomPw_() { return Utilities.getUuid().replace(/-/g, '').slice(0, 12)
 function validHashPair_(hash, salt) { return isHex64_(String(hash || '')) && String(salt || '').length >= 8; }
 
 /* --------------------------- 泛用表讀寫 ---------------------------------- */
+/** 分件命名：`旅通告` → `旅通告#1`、`旅通告#2`…（大庫分件；讀嘅時候自動合返） */
+function partName_(name, i) { return name + '#' + i; }
+function partSheets_(name) {
+  var out = [], all = ss_().getSheets(), base = name + '#';
+  all.forEach(function (sh) { if (sh.getName().indexOf(base) === 0) out.push(sh.getName()); });
+  return out.sort(function (a, b) { return Number(a.slice(base.length)) - Number(b.slice(base.length)); });
+}
+/** 分段讀：主分頁 ＋ 所有分件（順序）；分件係 #1、#2… */
+function readTableAll_(name) { return partSheets_(name).reduce(function (acc, p) { return acc.concat(readTable_(p)); }, readTable_(name)); }
+/** 唔再需要分件：清空 ＋ 刪走分頁（唔留一堆空分頁） */
+function dropParts_(name) {
+  var gone = 0;
+  partSheets_(name).forEach(function (pn) {
+    var sh = ss_().getSheetByName(pn);
+    if (!sh) return;
+    try { ss_().deleteSheet(sh); gone++; } catch (e) { try { writeTable_(pn, [], actor_()); gone++; } catch (e2) { Logger.log('drop part fail: ' + e2); } }
+  });
+  return gone;
+}
+/** 大庫寫入：超上限就自動切件（每件 ≤rowsPerWrite） */
+function writeSharded_(name, rows, by) {
+  if (rows.length <= LIMITS.rowsPerWrite) {
+    dropParts_(name);                                                      // 縮返細：清走＋刪走舊分件
+    return writeTable_(name, rows, by);
+  }
+  var parts = [];
+  for (var i = 0; i < rows.length; i += LIMITS.rowsPerWrite) parts.push(rows.slice(i, i + LIMITS.rowsPerWrite));
+  var rep = { ok: true, rows: rows.length, parts: [] };
+  for (var j = 0; j < parts.length; j++) {
+    var w = writeTable_(partName_(name, j + 1), parts[j], by);
+    rep.parts.push({ part: j + 1, ok: w.ok, rows: parts[j].length, msg: w.msg });
+    if (!w.ok) rep.ok = false;
+  }
+  if (rep.ok) { var w0 = writeTable_(name, [], by); if (!w0.ok) { rep.ok = false; rep.msg = w0.msg; } }   // 主分頁清空（真相＝分件）
+  rep.msg = rep.ok ? '已分 ' + parts.length + ' 件寫入' : '有分件寫唔入';
+  return rep;
+}
+
 function readTable_(name) {
   var sh = ss_().getSheetByName(name) || ensureSheet_(name, TABLE_HEADER);
   var last = sh.getLastRow();
@@ -320,6 +371,46 @@ function verifyAuditChain_() {
   }
   return { ok: true, rows: rows.length, head: prev };
 }
+/* --------------------------- 刪除＝tombstone ------------------------------ */
+/* BUILD §10-7：刪除唔係即刻消失，而係寫低「墓碑」（邊個、幾時、為咩），
+   前端靠墓碑知「呢行係真係被刪（唔係唔見咗）」；90 日後由 purge 清走。 */
+var TOMBSTONE_DAYS = 90;
+function tombstones() {
+  var sh = ss_().getSheetByName('_tombstone') || ensureSheet_('_tombstone', ['id', 'table', 'rowId', 'by', 'at', 'reason']);
+  var last = sh.getLastRow(); if (last < 2) return [];
+  return sh.getRange(2, 1, last - 1, 6).getValues().filter(function (r) { return r[0]; }).map(function (r) {
+    return { id: String(r[0]), table: String(r[1]), rowId: String(r[2]), by: String(r[3]), at: String(r[4]), reason: String(r[5]) };
+  });
+}
+function markDeleted(table, rowId, reason) {
+  var sh = ensureSheet_('_tombstone', ['id', 'table', 'rowId', 'by', 'at', 'reason']);
+  sh.appendRow([uid_('tm'), String(table), String(rowId), sanitizeLabel_(actor_()), stamp_(), String(reason || '').slice(0, 120)]);
+  return { id: table + '/' + rowId };
+}
+function purgeTombstones() {
+  var cut = now_().getTime() - TOMBSTONE_DAYS * 24 * 3600 * 1000;
+  var sh = ss_().getSheetByName('_tombstone'); if (!sh) return 0;
+  var last = sh.getLastRow(); if (last < 2) return 0;
+  var vals = sh.getRange(2, 1, last - 1, 6).getValues();
+  var keep = vals.filter(function (r) { var d = new Date(String(r[4]).replace(' ', 'T')).getTime(); return !(d && d < cut); });
+  var n = vals.length - keep.length;
+  if (n) { sh.getRange(2, 1, vals.length, 6).clearContent(); if (keep.length) sh.getRange(2, 1, keep.length, 6).setValues(keep); }
+  return n;
+}
+/** 刪一行（前端用）：表 ＋ row id ＋ 理由 → 墓碑；table 用 readTableAll_ 讀（分件都讀） */
+function deleteRow(o) {
+  var table = String(o.table || '');
+  if (TABLES.indexOf(table) < 0) return err_('bad_table', '冇呢個表');
+  var rows = readTableAll_(table), before = rows.length;
+  var kept = rows.filter(function (r) { return String(r.id) !== String(o.rowId) && String(r.__id) !== String(o.rowId); });
+  if (kept.length === before) return err_('no_row', '搵唔到呢一行（可能已經刪咗）');
+  var w = writeSharded_(table, kept, actor_());
+  if (!w.ok) return err_('write_fail', w.msg);
+  markDeleted(table, o.rowId, o.reason);
+  audit_(actor_(), '刪除行', table + '/' + String(o.rowId), String(o.reason || ''), CTX.mode === 'server' ? 'api' : 'ui');
+  return ok_({ deleted: true, table: table, rowId: String(o.rowId), left: kept.length, tombstone: true });
+}
+
 function purgeOldLogs() {
   var cutoff = new Date(now_().getTime() - 24 * 30 * 24 * 3600 * 1000);
   var moved = 0;
@@ -332,7 +423,8 @@ function purgeOldLogs() {
     moved += vals.length - keep.length;
     if (keep.length !== vals.length) { sh.getRange(2, 1, vals.length, sh.getLastColumn()).clearContent(); if (keep.length) sh.getRange(2, 1, keep.length, keep[0].length).setValues(keep); }
   });
-  audit_('（系統）', 'purge', '24 個月前紀錄', '清走 ' + moved + ' 行', 'menu');
+  var tm = purgeTombstones();
+  audit_('（系統）', 'purge', '24 個月前紀錄', '清走 ' + moved + ' 行；墓碑 ' + tm + ' 個', 'menu');
   return { ok: true, msg: '已清 ' + moved + ' 行（24 個月前）' };
 }
 
@@ -484,10 +576,65 @@ function getDownstreams() {
   });
   return ids.map(function (id) { return out[id]; }).sort(function (a, b) { return a.id < b.id ? -1 : 1; });
 }
+/* --------------------------- 支部狀態（紅黃綠） ---------------------------
+   三態：green（啱啱測過連線正常）／amber（未測過／好耐冇測）／red（測唔到）。
+   ★ 手動紅燈：BASE2 講「未起好進度 sig 路徑之前，進度燈用手動紅」→ setUnitStatus。
+   ★ 零回打：狀態一律由**我哋主動測**或者人手設定，下游永遠唔會通知我哋。 */
+var STATUS_MAX_AGE_MS = 26 * 60 * 60 * 1000;    // 超過 26 鐘頭未測 → 當 amber
+function readUnitStatus_() {
+  var rows = readTable_('設定值'), out = {};
+  rows.forEach(function (r) { if (String(r.id).indexOf('unitStatus:') === 0) out[String(r.id).slice(11)] = r; });
+  return out;
+}
+function setUnitStatus(o) {
+  var id = sanitizeLabel_(o.id).toLowerCase();
+  if (!id) return { ok: false, msg: '要支部 id' };
+  if (['green', 'amber', 'red'].indexOf(String(o.status)) < 0) return { ok: false, msg: '狀態只可以 green／amber／red' };
+  var rows = readTable_('設定值').filter(function (r) { return String(r.id) !== 'unitStatus:' + id; });
+  rows.push({ id: 'unitStatus:' + id, status: String(o.status), note: String(o.note || '').slice(0, 200), manual: true, at: stamp_(), by: actor_() });
+  var w = writeTable_('設定值', rows, actor_());
+  audit_(actor_(), '設定支部燈號', id, String(o.status) + (o.note ? '（' + String(o.note).slice(0, 80) + '）' : ''), 'api');
+  return w.ok ? { ok: true, id: id, status: String(o.status) } : { ok: false, msg: w.msg };
+}
+/** 支部註冊表（＝前端「註冊表／接駁」用）：登記資料 ＋ 燈號 ＋ 有冇試過連線 */
+function registry() {
+  var reg = readDownstreams_(), st = readUnitStatus_();
+  return reg.map(function (d) {
+    var s0 = st[d.id] || null;
+    var last = s0 && s0.status ? s0 : null;
+    var status = 'amber', note = '未測過連線', at = d.at || '';
+    if (last) { status = last.status; note = last.note || ''; at = last.at || at; }
+    else if (d.lastTest && d.lastTest.ok) { status = 'green'; note = '上次測試連線成功'; at = d.lastTest.at; }
+    else if (d.lastTest && d.lastTest.ok === false) { status = 'red'; note = '上次測試連線失敗：' + d.lastTest.msg; at = d.lastTest.at; }
+    else if (at) {
+      var age = Date.now() - Date.parse(String(at).replace(' ', 'T') + ':00+08:00');
+      if (isFinite(age) && age > STATUS_MAX_AGE_MS) { status = 'amber'; note = '好耐冇測過連線'; }
+    }
+    return { id: d.id, name: d.name, api: d.api, linked: d.linked, status: status, note: note, at: at, tested: !!d.lastTest };
+  });
+}
+/* 純讀版 registry（唔可以寫入）：直接由 properties 砌，避免讀寫循環 */
+function readDownstreams_() {
+  var p = props_(), all = p.getProperties(), ids = [];
+  Object.keys(all).forEach(function (k) { var m = k.match(/^DOWNSTREAM_(.+)_URL$/); if (m) ids.push(m[1]); });
+  return ids.sort().map(function (id) {
+    var lt = null;
+    try { lt = all['DOWNSTREAM_' + id + '_LASTTEST'] ? JSON.parse(all['DOWNSTREAM_' + id + '_LASTTEST']) : null; } catch (e) { lt = null; }
+    return {
+      id: id, name: all['DOWNSTREAM_' + id + '_NAME'] || id, api: all['DOWNSTREAM_' + id + '_API'] || 'v1',
+      at: all['DOWNSTREAM_' + id + '_AT'] || '', linked: !!all['DOWNSTREAM_' + id + '_URL'], lastTest: lt
+    };
+  });
+}
 function testDownstream(id) {
+  id = sanitizeLabel_(id).toLowerCase();
   var r = callDownstream(id, 'getLinkState', {});
-  if (!r.ok) { audit_('（管理員）', '測試下游連線', id, '失敗：' + r.msg, 'menu'); return { ok: false, msg: r.msg }; }
-  audit_('（管理員）', '測試下游連線', id, '成功', 'menu');
+  /* 記低測試結果（唔落 Sheet；registry 只住 ScriptProperties） */
+  try {
+    props_().setProperty('DOWNSTREAM_' + id + '_LASTTEST', json_({ ok: !!r.ok, msg: r.ok ? '' : String(r.msg || '').slice(0, 120), at: stamp_() }));
+  } catch (e) { /* 記唔到就唔記：唔會影響測試本身 */ }
+  audit_(actor_(), '測試下游連線', id, r.ok ? '成功' : ('失敗：' + r.msg), CTX.mode === 'server' ? 'api' : 'menu');
+  if (!r.ok) return { ok: false, msg: r.msg };
   return { ok: true, data: r.data, msg: '下游回覆正常' };
 }
 function setLocalLogin(o) {
@@ -520,16 +667,77 @@ function openAccountForDownstream(o) {
   return { ok: true, user: publicUser_(u) };
 }
 
+/* --------------------------- 權限（封頂：下級 ⊆ 上級） -------------------
+   規矩（BUILD §3 附帶、落差報告 #9）：授權唔可以超過自己嘅層級 ——
+     · 角色階級 rank：super 99 ＞ chief 5 ＞ coach 4 ＞ branch_chief 3 ＞ exec 2 ＞ member 1
+     · 一個人嘅有效權限 ＝ 自己角色嘅權限 ∪ 逐人加嘅 `perms`，但**封頂到自己角色**
+       （除非 actor 係 chief／super：旅長本身有嘅權限可以授落去）
+     · 想加嘅權限超出自己 → **如實回報 clamped**（唔會靜靜收窄，亦唔會偷偷放寬） */
+var ROLE_RANK = { super: 99, chief: 5, coach: 4, branch_chief: 3, exec: 2, coach_staff: 3, parent: 1, member: 1, guest: 0 };
+var ROLE_PERMS = {
+  chief: ['view_all', 'branch_view', 'share_decide', 'share_send', 'branch_link_edit', 'open_account_downstream', 'notice_publish',
+    'calendar_edit', 'finance_view', 'finance_confirm', 'inventory_all', 'transfer_all', 'user_manage', 'identity_manage',
+    'invite_create', 'public_edit', 'module_toggle', 'system_all', 'audit_view', 'enter_any_branch'],
+  coach: ['branch_view', 'enter_granted_branch', 'share_decide', 'share_send', 'notice_publish', 'calendar_edit', 'finance_view',
+    'finance_submit_troop', 'inventory_all', 'transfer_view', 'user_view', 'public_edit', 'audit_view'],
+  parent: ['children_view', 'notice_view', 'calendar_view', 'share_send'],
+  member: ['self_view', 'notice_view', 'calendar_view', 'branch_own', 'share_decide', 'share_send'],
+  super: ['platform_all', 'enter_any_branch', 'branch_view', 'view_all', 'branch_link_edit', 'user_manage', 'audit_view'],
+  guest: ['public_view']
+};
+function rankOf_(role) { return ROLE_RANK[String(role || '')] || 0; }
+function permsOf_(role) { return (ROLE_PERMS[String(role || '')] || []).slice(); }
+/** 邊個角色有嘅權限（用嚟封頂） */
+function ceilingFor_(actorRole) { return permsOf_(actorRole); }
+/**
+ * 封頂：想加嘅 perms 只可以係自己（或者自己角色）有嘅
+ * @returns {{perms:string[], clamped:string[]}}
+ */
+function capPerms_(want, actorRole) {
+  var ceiling = ceilingFor_(actorRole);
+  var allow = {}, kept = [], clamped = [];
+  ceiling.forEach(function (p) { allow[p] = true; });
+  (Array.isArray(want) ? want : []).forEach(function (p0) {
+    var p = sanitizeLabel_(p0);
+    if (!p) return;
+    if (allow[p]) { if (kept.indexOf(p) < 0) kept.push(p); } else { clamped.push(p); }
+  });
+  return { perms: kept, clamped: clamped };
+}
+/** 角色昇級封頂：唔可以授一個唔低過自己嘅角色 */
+function capRole_(want, actorRole) {
+  var w = String(want || ''), a = String(actorRole || '');
+  if (a === 'super') return { role: w, clamped: false };
+  if (rankOf_(w) >= rankOf_(a)) return { role: a, clamped: true, asked: w };
+  return { role: w, clamped: false };
+}
+
 /* --------------------------- 用戶 ---------------------------------------- */
-function readUsers_() { return readTable_('旅員').map(function (u) { return u; }); }
+function readUsers_() { return readTableAll_('旅員'); }
 function findUser_(key) {
   var k = String(key || '').trim().toLowerCase();
   return readUsers_().filter(function (u) { return String(u.email || '').toLowerCase() === k || String(u.id || '') === key; })[0] || null;
 }
+/** 一個人嘅有效權限（角色 ∪ 逐人 perms，但逐人 perms 一樣要封頂） */
+/** 邊個角色做嘢：server（apikey）＝super；有 asUser ＝查該用戶 */
+function actorRole_() {
+  var key = String((CTX.body && CTX.body.asUser) || '').trim();
+  if (!key) return CTX.mode === 'server' ? 'super' : (CTX.mode === 'upstream' ? 'coach' : 'member');
+  var u = findUser_(key);
+  /* ★ fail closed：帶咗 asUser 但搵唔到／已經停用 → 當最低權限（唔會當超管） */
+  if (!u || (u.status && u.status !== 'active')) return 'member';
+  return String(u.role || 'member');
+}
+function effectivePerms_(u) {
+  var base = permsOf_(u && u.role);
+  var extra = capPerms_(u && u.perms, u && u.role).perms;
+  return base.concat(extra.filter(function (p) { return base.indexOf(p) < 0; }));
+}
 function publicUser_(u) {
   if (!u) return null;
   var o = JSON.parse(JSON.stringify(u));
-  ['hash', 'salt', 'pw', 'password_hash', 'password_salt', 'apiKey', 'apikey'].forEach(function (k) { delete o[k]; });
+  ['hash', 'salt', 'pw', 'password_hash', 'password_salt', 'apiKey', 'apikey', 'setupToken'].forEach(function (k) { delete o[k]; });
+  o.effectivePerms = effectivePerms_(u);          // 前端攞嚟畫掣；真正授權永遠喺 server
   return o;
 }
 function upsertUser_(o, via) {
@@ -727,7 +935,12 @@ function doPost(e) {
       var v = verifySig_(action, rawBody, params, body);
       if (!v.ok) { bumpFail_(CTX.ip); access_('SIG_FAIL', '', CTX.ip, action + '：' + v.msg); return ContentService.createTextOutput(json_(err_('bad_sig', v.msg))).setMimeType(ContentService.MimeType.JSON); }
       CTX.mode = 'upstream'; CTX.actor = 'upstream'; clearFails_(CTX.ip);
-    } else if (['login', 'superLogin', 'redeemInvite', 'status', 'getDownstreams'].indexOf(action) < 0) {
+    } else if (ANON_WRITE_ACTIONS.indexOf(action) >= 0) {
+      /* 匿名可寫（求救）：有上限；落 `操作紀錄` 記低（誰／邊個 IP／幾時） */
+      var q = anonQuotaOk_(CTX.ip);
+      if (!q.ok) { access_('ANON_LIMIT', '', CTX.ip, action + '：已經 ' + q.used + ' 單'); return ContentService.createTextOutput(json_(err_('rate_limited', '同一個網絡今日送得太多單 —— 請等一等，或者用官方回報頁'))).setMimeType(ContentService.MimeType.JSON); }
+      access_('ANON_WRITE', '', CTX.ip, action);
+    } else if (['login', 'superLogin', 'redeemInvite', 'status', 'getDownstreams', 'registry'].indexOf(action) < 0) {
       return ContentService.createTextOutput(json_(err_('need_auth', '要 apikey 或 sig（或者用 login 類 action）'))).setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -762,12 +975,12 @@ function dispatch_(action, body, params) {
     case 'dbInfo': return ok_(dbInfo());
     case 'load': {
       var name = String(body.table || ''); if (TABLES.indexOf(name) < 0) return err_('bad_table', '冇呢個表：' + name);
-      var rows = readTable_(name);
+      var rows = readTableAll_(name);          // 分件都讀齊
       var sensitive = (body.withSecrets === true) && CTX.mode === 'server' && !body.asUser;
       return ok_(sensitive ? rows : rows.map(function (r) { return publicUser_(r); }));
     }
     case 'loadTables': {
-      var data = {}; (body.tables && body.tables.length ? body.tables : TABLES).forEach(function (t) { if (TABLES.indexOf(t) >= 0) data[t] = readTable_(t).map(publicUser_); });
+      var data = {}; (body.tables && body.tables.length ? body.tables : TABLES).forEach(function (t) { if (TABLES.indexOf(t) >= 0) data[t] = readTableAll_(t).map(publicUser_); });   // 分件都讀齊
       return ok_({ data: data, version: APP.version });
     }
     case 'saveTables': {
@@ -775,10 +988,10 @@ function dispatch_(action, body, params) {
       var wrote = {}, fails = [];
       Object.keys(body.data).forEach(function (t) {
         if (TABLES.indexOf(t) < 0) { fails.push(t + '：唔喺白名單'); return; }
-        var w = writeTable_(t, body.data[t] || [], actor_());
+        var w = writeSharded_(t, body.data[t] || [], actor_());      // 超上限自動分件（大庫分件）
         if (w.ok) { wrote[t] = (body.data[t] || []).length; } else { fails.push(t + '：' + w.msg); }
       });
-      var back = {}; Object.keys(wrote).forEach(function (t) { back[t] = readTable_(t).length; });
+      var back = {}; Object.keys(wrote).forEach(function (t) { back[t] = readTableAll_(t).length; });   // 自證要計埋分件
       var confirmed = fails.length === 0 && Object.keys(wrote).every(function (t) { return back[t] >= wrote[t]; });
       sync_(CTX.mode, Object.keys(wrote).join(','), APP.version, confirmed, 0);
       audit_(actor_(), '逐表寫入', Object.keys(wrote).join(','), 'confirmed=' + confirmed + (fails.length ? ('；失敗：' + fails.join(' / ')) : ''), CTX.mode === 'server' ? 'api' : 'sig');
@@ -786,8 +999,8 @@ function dispatch_(action, body, params) {
     }
     case 'saveTable': {
       if (TABLES.indexOf(body.table) < 0) return err_('bad_table', '冇呢個表');
-      var w2 = writeTable_(body.table, body.rows || [], actor_());
-      return w2.ok ? ok_({ confirmed: true, rows: w2.rows }) : err_('write_fail', w2.msg);
+      var w2 = writeSharded_(body.table, body.rows || [], actor_());     // 超上限自動分件
+      return w2.ok ? ok_({ confirmed: true, rows: w2.rows, parts: w2.parts || [] }) : err_('write_fail', w2.msg);
     }
     case 'authUser': {
       var u = findUser_(body.email);
@@ -878,7 +1091,14 @@ function dispatch_(action, body, params) {
     case 'getPublicProfile': return ok_(readTable_('公開資料'));
     case 'getApplications': return ok_(readTable_('申請'));
     case 'getConfig': return ok_({ unit: unitId_(), app: APP, modules: listModules_(), localLogin: readGate_() });
-    case 'getSummary': return ok_({ unit: unitId_(), branches: readTable_('支部').length, users: readUsers_().length, notices: readTable_('旅通告').length, rescues: readTable_('求救').filter(function (r) { return r.state !== 'done'; }).length });
+    case 'getSummary': return ok_({
+      unit: unitId_(), name: (readTable_('公開資料')[0] || {}).name || '',
+      branches: readTable_('支部').length, users: readUsers_().length,
+      notices: readTable_('旅通告').length, rescues: readTable_('求救').filter(function (r) { return r.state !== 'done'; }).length,
+      finance: readTable_('財務整合').length, inventory: readTable_('物資整合').length,
+      shares: readTable_('分享').length,
+      units: registry()                     // 支部燈號（綠／黃／紅＋原因＋時間）
+    });
     case 'getAuditLog': return ok_(readTable_('審計紀錄').slice(-Number(body.limit || 200)));
     /* ---- 上游對我哋用嘅寫 action ---- */
     case 'save': case 'saveTable2': {
@@ -912,16 +1132,54 @@ function dispatch_(action, body, params) {
     case 'updateUserRole': case 'updatePermissions': {
       var rows3 = readUsers_(), i3 = rows3.map(function (r) { return r.id; }).indexOf(body.id);
       if (i3 < 0) return err_('no_user', '搵唔到');
-      if (body.role !== undefined) rows3[i3].role = sanitizeLabel_(body.role);
-      if (body.perms !== undefined) rows3[i3].perms = body.perms;
+      /* ★ 封頂：唔可以授一個唔低過自己嘅角色；權限只可以授自己角色有嘅 */
+      var actorRole = actorRole_();
+      var clamped = { role: [], perms: [] };
+      if (body.role !== undefined) {
+        var cr = capRole_(body.role, actorRole);
+        rows3[i3].role = cr.role;
+        if (cr.clamped) clamped.role.push(cr.asked + '→' + cr.role + '（唔可以授唔低過自己嘅角色）');
+      }
+      if (body.perms !== undefined) {
+        var cp = capPerms_(body.perms, actorRole);
+        rows3[i3].perms = cp.perms;
+        if (cp.clamped.length) clamped.perms = cp.clamped;
+      }
       var w8 = writeTable_('旅員', rows3, actor_());
-      return w8.ok ? ok_(publicUser_(rows3[i3])) : err_('write_fail', w8.msg);
+      if (!w8.ok) return err_('write_fail', w8.msg);
+      var outU = publicUser_(rows3[i3]);
+      if (clamped.role.length || clamped.perms.length) {
+        outU.clamped = clamped;
+        return ok_({ user: outU, clamped: clamped, note: '有啲權限超出你嘅層級，已經如實封頂（冇靜靜放寬）' });
+      }
+      return ok_(outU);
     }
     case 'setUserStatus': return setUserStatus(body);
     case 'deleteUser': return deleteUser(body);
     case 'resetPassword': return resetPassword(body);
     case 'upsertUser': return upsertUser(body);
     case 'saveNotice': return saveNotice(body);
+    case 'saveShare': return saveShare(body);
+    case 'saveRescue': return saveRescue(body);
+    case 'registry': return ok_(registry());
+    case 'deleteRow': return deleteRow(body);
+    case 'saveDbPart': {
+      /* 前端主動分件：{ table, part, rows, reset }；part=0 ＝主分頁 */
+      if (TABLES.indexOf(body.table) < 0) return err_('bad_table', '冇呢個表');
+      var pn = Number(body.part || 0);
+      if (pn < 0 || pn > 50) return err_('bad_part', '件號 0–50');
+      var target = pn === 0 ? body.table : partName_(body.table, pn);
+      if (body.reset && pn === 0) dropParts_(body.table);          // reset＝清走舊分件（連分頁刪埋）
+      var wp = writeTable_(target, body.rows || [], actor_());
+      return wp.ok ? ok_({ part: pn, sheet: target, rows: (body.rows || []).length, confirmed: true }) : err_('write_fail', wp.msg);
+    }
+    case 'purgeTombstones': return ok_({ purged: purgeTombstones() });
+    case 'getTombstones': {
+      var tl = tombstones();
+      if (body.table) tl = tl.filter(function (x) { return x.table === body.table; });
+      return ok_(tl.slice(-Number(body.limit || 500)));
+    }
+    case 'setUnitStatus': return wrap_(setUnitStatus(body), 'status_fail');
     case 'saveFinanceEntry': return saveFinanceEntry(body);
     case 'saveAudit': return ok_(audit_(actor_(), body.actionName || '（前端）', body.target || '', body.detail || '', 'ui'));
     case 'getAccessLog': return ok_(readTable_('操作紀錄').slice(-Number(body.limit || 200)));
@@ -959,6 +1217,37 @@ function resetPassword(o) {
   rows[i].hash = String(o.password_hash); rows[i].salt = String(o.password_salt || rows[i].salt); rows[i].mustChangePw = true; rows[i].pv = (rows[i].pv || 1) + 1;
   var w = writeTable_('旅員', rows, 'api'); audit_(actor_(), '重設密碼', o.email, '首登強制改', 'api');
   return w.ok ? ok_({ mustChangePw: true }) : err_('write_fail', w.msg);
+}
+/** 分享（旅側發起 → 支部收件方決定）寫入 `分享` 表 */
+function saveShare(o) {
+  var rec = Object.assign({ id: uid_('sh'), at: stamp_(), by: actor_(), state: 'pending' }, o.share || {});
+  rec.title = String(rec.title || '').slice(0, 120);
+  rec.to = Array.isArray(rec.to) ? rec.to.map(sanitizeLabel_).slice(0, 50) : [];
+  if (!rec.title) return err_('bad_share', '分享要有標題');
+  var rows = readTable_('分享').filter(function (r) { return r.id !== rec.id; }); rows.push(rec);
+  var w = writeTable_('分享', rows, actor_());
+  if (!w.ok) return err_('write_fail', w.msg);
+  audit_(actor_(), '發起分享', rec.id, rec.title + ' → ' + (rec.to.join('、') || '（未揀對象）'), CTX.mode === 'server' ? 'api' : 'ui');
+  return ok_({ saved: true, id: rec.id, to: rec.to, state: rec.state });
+}
+/** 求救／問題回報**落旅 SHEET**（免登入都寫得：只可以 append，唔可以覆蓋其他人嘅單） */
+function saveRescue(o) {
+  var r0 = o.rescue || {};
+  var rec = {
+    id: r0.id ? sanitizeLabel_(r0.id) : uid_('rs'),
+    at: stamp_(), by: String(r0.by || '').slice(0, 60), contact: String(r0.contact || '').slice(0, 80),
+    branchId: sanitizeLabel_(r0.branchId || ''), kind: sanitizeLabel_(r0.kind || 'other'),
+    title: String(r0.title || '').slice(0, 120), severity: sanitizeLabel_(r0.severity || ''),
+    note: String(r0.note || '').slice(0, 2000), state: 'open', via: CTX.mode === 'upstream' ? 'sig' : (CTX.mode === 'server' ? 'api' : 'anon')
+  };
+  if (!rec.title || !rec.note) return err_('bad_rescue', '求救要有標題同詳情');
+  var rows = readTable_('求救');
+  if (rows.filter(function (r) { return r.id === rec.id; }).length) return err_('duplicate', '呢張單已經存在（冪等）');
+  rows.push(rec);
+  var w = writeTable_('求救', rows, rec.by || '（免登入）');
+  if (!w.ok) return err_('write_fail', w.msg);
+  access_('RESCUE', rec.by || '', CTX.ip, rec.id + '｜' + rec.kind + '｜' + rec.severity);
+  return ok_({ saved: true, id: rec.id, at: rec.at, state: rec.state });
 }
 function saveNotice(o) {
   var rows = readTable_('旅通告'); rows.push(Object.assign({ id: uid_('n'), at: stamp_(), by: actor_() }, o.notice || {}));

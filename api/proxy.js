@@ -27,8 +27,19 @@ export const GAS_WHITELIST = [
   'createInvite', 'listInvites', 'revokeInvite',
   'getDownstreams', 'registerDownstream', 'testDownstream', 'updateDownstream', 'removeDownstream',
   'setLocalLogin', 'getLoginMode', 'getLinkState', 'listModules', 'setModule',
-  'getSummary', 'getAuditLog', 'getAccessLog', 'saveAudit', 'logAccess'
+  'getSummary', 'getAuditLog', 'getAccessLog', 'saveAudit', 'logAccess',
+  /* P1：支部狀態／分享／求救／內容寫入 */
+  'registry', 'saveShare', 'saveRescue', 'getTombstones'
 ];
+/** 只有旅長（role=chief）先可以用（寫入類／管治類） */
+export const CHIEF_ONLY = [
+  'saveNotice', 'saveFinanceEntry', 'saveShare', 'setUnitStatus',
+  'deleteRow', 'saveDbPart', 'purgeTombstones',          // 破壞性／體積治理：只旅長做得
+  'createInvite', 'revokeInvite', 'registerDownstream', 'updateDownstream', 'removeDownstream',
+  'setLocalLogin', 'setModule', 'upsertUser', 'setUserStatus', 'deleteUser', 'resetPassword'
+];
+/** 旅長 ＋ 教練員（coach）都可以用 */
+export const LEADER_ACTIONS = ['testDownstream', 'openAccountForDownstream', 'importUsers', 'updateUserProfile', 'updateUserRole', 'updatePermissions'];
 /** 唔使 session 都讀得（只係健康／公開讀） */
 const PUBLIC_GAS = ['status'];
 
@@ -122,11 +133,23 @@ export default async function handler(req, res) {
   }
 
   /* ---------- action = 旅 GAS（白名單；server 側 inject apikey） ---------- */
-  if (GAS_WHITELIST.includes(action)) {
+  if (GAS_WHITELIST.includes(action) || CHIEF_ONLY.includes(action) || LEADER_ACTIONS.includes(action)) {
     /* session 驗證（'status' 例外）→ 前端唔會、亦唔可以自己帶 key */
     const secret = process.env.SESSION_SECRET || '';
     const sess = verifySession(String(req.headers.cookie || '').split(';').map(x => x.trim()).find(x => x.startsWith('troop_session='))?.slice('troop_session='.length) || '', secret);
     if (!PUBLIC_GAS.includes(action) && !sess) return send(res, 401, { success: false, error: '要登入（session 過期／未登入）', code: 'no_session' });
+    /* 權限：旅長 vs 教練員（隱藏超管唔喺 session 上，佢用 /api/super 票據，唔經呢條路） */
+    if (sess) {
+      const role = String(sess.role || '');
+      const isChief = role === 'chief';
+      const isCoach = isChief || role === 'coach';
+      if (CHIEF_ONLY.includes(action) && !isChief) {
+        return send(res, 403, { success: false, error: `「${action}」只有旅長做得（你係 ${role || '未設定'}）`, code: 'need_chief', need: 'chief' });
+      }
+      if (LEADER_ACTIONS.includes(action) && !isCoach) {
+        return send(res, 403, { success: false, error: `「${action}」只有旅長／教練員做得（你係 ${role || '未設定'}）`, code: 'need_leader', need: 'chief|coach' });
+      }
+    }
 
     const unit = normUnit(body.unit || (sess && sess.unit) || '');
     if (!unit) return send(res, 400, { success: false, error: '要 unit（旅 ID）' });

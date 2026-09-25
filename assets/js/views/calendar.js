@@ -38,6 +38,7 @@ export function render(el, params, query = {}) {
     <span class="grow"></span>
     ${can(role, 'calendar_edit') ? `<button class="btn sm primary" id="cal-new">${icon('plus', 14)} 加活動</button>` : ''}
     <button class="btn sm" id="cal-ics">${icon('download', 14)} 匯出 ICS</button>
+    <button class="btn sm" id="cal-subs">${icon('bell', 14)} 訂閱日曆</button>
   `)}
   ${card({ body: `
     <div class="vis-legend mb-12">
@@ -96,6 +97,7 @@ export function render(el, params, query = {}) {
   el.querySelector('#cal-ics')?.addEventListener('click', () => {
     downloadFile('troop-calendar.ics', ics(events), 'text/calendar');
   });
+  el.querySelector('#cal-subs')?.addEventListener('click', () => openSubscribeFeed(events));
 }
 
 function setQuery(q) {
@@ -107,6 +109,52 @@ function setQuery(q) {
 const prevMonth = m => { const [y, mm] = m.split('-').map(Number); const d = new Date(y, mm - 2, 1); return iso(d).slice(0, 7); };
 const nextMonth = m => { const [y, mm] = m.split('-').map(Number); const d = new Date(y, mm, 1); return iso(d).slice(0, 7); };
 const pad = n => String(n).padStart(2, '0');
+
+/* ---------------- 訂閱日曆（.ics feed ＋ 簽名分享） ---------------- */
+function openSubscribeFeed(events) {
+  const base = location.origin + location.pathname.replace(/[^/]*$/, '');
+  const feed = `${base}api/troop?unit=${encodeURIComponent(S.load()?.unit?.code || '0082')}&calendar=1`;
+  const icsUrl = `${base}troop-calendar.ics`;
+  const m = modal({
+    title: '訂閱／分享日曆',
+    body: `
+    ${notice('訂閱＝出面嘅日曆 app（Google／Apple）自己定時嚟攞；<b>分享連結</b>＝一條過，帶簽名同到期日。兩種都<b>唔使登入</b>，亦冇任何 key 落 URL。', 'info')}
+    <div class="card pad-l">
+      <b class="sm">① 訂閱（feed）</b>
+      <div class="mono xs mt-4" style="word-break:break-all">${esc(feed.replace(/\?.*$/, '?unit=…（真模式先有 feed；示範唔提供）'))}</div>
+      <div class="xs faint mt-4">真模式：<span class="mono">/api/troop?calendar=1</span> 回 ICS（唯讀、有 cache）；Apple／Google 加「用 URL 訂閱」就長期跟住旅嘅活動。<br>示範模式：唔會發請求 —— 請用下面「匯出 ICS」。</div>
+      <div class="btn-row mt-8"><button class="btn sm" data-dl>${icon('download', 13)} 即刻匯出 ICS（${events.length} 項）</button>
+      <button class="btn sm" data-copy-ics>${icon('copy', 13)} 複製 .ics 檔名</button></div>
+    </div>
+    <div class="card pad-l mt-12">
+      <b class="sm">② 分享單一活動（簽名連結，最長 90 日）</b>
+      <div class="xs faint mt-4">同一條 <span class="mono">/api/share</span>：種類只開放<b>通告</b>同<b>活動</b>（Sprint 4 定案）；過期／改過一律驗唔到。</div>
+      <div class="xs faint mt-4">示範模式：下面會列出會用嘅參數，唔會真發請求。</div>
+      <div id="cal-share-out" class="mt-8"></div>
+      <div class="btn-row mt-8"><button class="btn sm primary" data-share-ev>${icon('link', 13)} 產生活動分享連結</button></div>
+    </div>`,
+    footer: `<button class="btn" data-close>關閉</button>`
+  });
+  const out = m.el.querySelector('#cal-share-out');
+  m.el.querySelector('[data-close]').onclick = m.close;
+  m.el.querySelector('[data-dl]').onclick = () => downloadFile('troop-calendar.ics', ics(events), 'text/calendar');
+  m.el.querySelector('[data-copy-ics]').onclick = () => copyText('troop-calendar.ics');
+  m.el.querySelector('[data-share-ev]').onclick = async () => {
+    const ev = events[0];
+    if (!ev) { out.innerHTML = '<div class="xs faint">今個月冇活動可以分享。</div>'; return; }
+    const r = await API.shareLink({ kind: 'calendar', id: ev.id, days: 30 });
+    if (!r.ok && r.code === 'mock') {
+      out.innerHTML = `<div class="info-box xs">示範模式：<span class="mono">/api/share {kind:'calendar', id:'${esc(ev.id)}', unit:'${esc(S.load()?.unit?.code || '')}', days:30}</span><br>真模式回 <span class="mono">/public.html?tab=calendar&amp;e=…&amp;s=&lt;簽名&gt;</span></div>`;
+      return;
+    }
+    if (!r.ok) { out.innerHTML = `<div class="warn-box xs">產生唔到：${esc(r.msg || r.code)}（要 ADMIN 設 SHARE_SECRET／SESSION_SECRET）</div>`; return; }
+    const abs = location.origin + r.data.url;
+    out.innerHTML = `<div class="mono xs" style="word-break:break-all">${esc(abs)}</div>
+      <div class="btn-row mt-8"><button class="btn sm" data-c>${icon('copy', 13)} 複製</button></div>
+      <div class="xs faint mt-4">活動：${esc(ev.title)}；到期 ${esc(new Date(r.data.payload.exp).toLocaleDateString('zh-HK'))}</div>`;
+    out.querySelector('[data-c]').onclick = () => copyText(abs);
+  };
+}
 
 function ics(events) {
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//troop_portal//ZH-HK//', 'CALSCALE:GREGORIAN'];

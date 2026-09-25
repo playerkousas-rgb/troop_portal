@@ -1,6 +1,7 @@
 /* 通告 — 發佈、分享、報名、公開頁、個人化訂閱 ★ */
 import { esc, icon, fmtDate, fmtDateFull, money, toast, copyText, qrSvg, downloadFile, toCSV, relTime } from '../lib/util.js';
 import * as S from '../lib/store.js';
+import * as API from '../lib/api.js';
 import { go } from '../lib/router.js';
 import { page, card, table, badge, notice, tabs, modal, kv, stat, toolbar, searchBox, selectBox, empty } from './ui.js';
 import { can, moduleEnabled, shareableTargets, visName, VIS_LEVELS } from '../lib/registry.js';
@@ -324,11 +325,38 @@ function openShare(id) {
         </div>
         <div class="xs faint mt-8">貼落 WhatsApp 群：團員／家長一撳就開通告同報名表。</div>
       </div>
+    </div>
+    <hr>
+    <div class="card pad-l">
+      <b class="sm">🔐 有簽名嘅分享連結（真模式；最長 90 日）</b>
+      <div class="xs faint mt-4">同上面唔同：連結帶<b>簽名同到期日</b>，過期自動失效、改過就驗唔到。<b>stateless</b>——唔使喺資料庫存任何東西，亦冇 key 落 URL。</div>
+      <div class="btn-row mt-8"><button class="btn sm primary" data-signed>${icon('link', 13)} 產生簽名連結</button>
+        <span class="xs faint">有效期
+          <select id="sh-days" class="mono"><option value="7">7 日</option><option value="30" selected>30 日</option><option value="90">90 日</option></select>
+        </span></div>
+      <div id="sh-out" class="mt-8"></div>
     </div>`,
     footer: `<button class="btn" data-close>關閉</button>`
   });
   m.el.querySelector('[data-close]').onclick = m.close;
   m.el.querySelector('[data-copy]').onclick = () => copyText(url);
+  m.el.querySelector('[data-signed]').onclick = async () => {
+    const days = Number(m.el.querySelector('#sh-days').value) || 30;
+    const out = m.el.querySelector('#sh-out');
+    out.innerHTML = '<div class="xs faint">產生中…</div>';
+    const r = await API.shareLink({ kind: 'notice', id: n.id, days });
+    if (!r.ok && r.code === 'mock') {
+      out.innerHTML = `<div class="info-box xs">示範模式：唔會發請求。<br><span class="mono">${esc(location.origin + location.pathname.replace(/[^/]*$/, ''))}api/share?action=create&amp;kind=notice&amp;id=${esc(n.id)}&amp;days=${days}</span><br>真模式會回一條 <span class="mono">?s=&lt;payload&gt;.&lt;簽名&gt;</span> 嘅連結（90 日上限、過期自動失效）。</div>`;
+      return;
+    }
+    if (!r.ok) { out.innerHTML = `<div class="warn-box xs">產生唔到：${esc(r.msg || r.code)}（要 ADMIN 設 SHARE_SECRET／SESSION_SECRET）</div>`; return; }
+    const abs = location.origin + (r.data.url || '');
+    out.innerHTML = `<div class="mono xs" style="word-break:break-all">${esc(abs)}</div>
+      <div class="btn-row mt-8"><button class="btn sm" data-copy2>${icon('copy', 13)} 複製</button>
+      <a class="btn sm" href="${esc(r.data.url)}" target="_blank" rel="noopener">開嚟睇</a></div>
+      <div class="xs faint mt-4">到期：${esc(new Date(r.data.payload.exp).toLocaleDateString('zh-HK'))}（喺 /api/share 驗簽，過期／改過一律拒）</div>`;
+    out.querySelector('[data-copy2]').onclick = () => copyText(abs);
+  };
 }
 
 /* ---------------- 工具 ---------------- */

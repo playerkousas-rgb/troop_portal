@@ -87,6 +87,47 @@ export async function gasAction(action, payload = {}) {
   const g = guard(); if (g) return g;
   return jfetch('/api/proxy', { action, unit: unitId(), payload });
 }
+/* ------------------------- P1：聚合／註冊表／分享／求救 ------------------------- */
+/** 旅層聚合讀取（分層 cache：通告活動 5 分鐘、財務物資 30 分鐘） */
+export async function troop({ fresh = false } = {}) {
+  const g = guard(); if (g) return g;
+  const r = await fetch(`/api/troop?unit=${encodeURIComponent(unitId())}${fresh ? '&fresh=1' : ''}`, { credentials: 'same-origin' });
+  const j = await r.json().catch(() => null);
+  return j && j.success === true ? { ok: true, data: j.data } : { ok: false, code: (j && j.code) || 'fail', msg: (j && j.error) || `HTTP ${r.status}` };
+}
+/** 能力註冊表（呢個旅開咗邊啲模組／呢個支部用唔用得） */
+export async function registry({ branch = '', fresh = false } = {}) {
+  const g = guard(); if (g) return g;
+  const qs = new URLSearchParams({ unit: unitId() });
+  if (branch) qs.set('branch', branch);
+  if (fresh) qs.set('fresh', '1');
+  const r = await fetch(`/api/registry?${qs}`, { credentials: 'same-origin' });
+  const j = await r.json().catch(() => null);
+  return j && j.success === true ? { ok: true, data: j.data } : { ok: false, code: (j && j.code) || 'fail', msg: (j && j.error) || `HTTP ${r.status}` };
+}
+/** 成員入口導流（M1 一次登入／M3 轉去該團入口）—— 唔會做帳號枚舉 */
+export async function memberEntry(branch) {
+  const g = guard(); if (g) return g;
+  const r = await fetch(`/api/member-entry?unit=${encodeURIComponent(unitId())}&branch=${encodeURIComponent(branch)}`, { credentials: 'same-origin' });
+  const j = await r.json().catch(() => null);
+  return j && j.success === true ? { ok: true, data: j.data } : { ok: false, code: (j && j.code) || 'fail', msg: (j && j.error) || `HTTP ${r.status}` };
+}
+/** 產生有簽名嘅公開分享連結（通告／活動；最長 90 日） */
+export async function shareLink({ kind, id, to = '', days = 30 } = {}) {
+  const g = guard(); if (g) return g;
+  return jfetch('/api/share', { action: 'create', unit: unitId(), kind, id, to, exp: Date.now() + days * 24 * 3600 * 1000 });
+}
+/** 求救／問題回報**落旅 SHEET**（免登入都用得：ADMIN 先喺旅系統見到） */
+export async function saveRescue(rescue) {
+  const g = guard(); if (g) return g;
+  return jfetch('/api/proxy', { action: 'saveRescue', unit: unitId(), payload: { rescue } });
+}
+/** 發起分享（寫入旅 SHEET `分享` 表） */
+export async function saveShare(share) {
+  const g = guard(); if (g) return g;
+  return jfetch('/api/proxy', { action: 'saveShare', unit: unitId(), payload: { share } });
+}
+
 export async function getDownstreams({ fresh = false } = {}) {
   const g = guard(); if (g) return g;
   const r = await fetch(`/api/downstreams?unit=${encodeURIComponent(unitId())}${fresh ? '&fresh=1' : ''}`, { credentials: 'same-origin' });

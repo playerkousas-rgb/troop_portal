@@ -416,6 +416,11 @@ function renderGate() {
         kind: kindSel.value, title: form.title, severity: form.severity, note: form.desc
       });
       if (!res.ok) { gate.querySelector('#rs-err').innerHTML = `<div class="err mb-8">${esc(res.msg)}</div>`; return; }
+      /* ★ 真模式：求救亦要**落旅 SHEET**（否則 ADMIN 喺另一部機／旅系統見唔到） */
+      if (API.isLive()) {
+        const w = await API.saveRescue({ id: res.id, by: form.by, contact: form.contact, branchId: form.troopId, kind: kindSel.value, title: form.title, severity: form.severity, note: form.desc });
+        if (!w.ok) gate.querySelector('#rs-err').innerHTML = `<div class="warn-box mb-8">送入旅 SHEET 失敗：${esc(w.msg || '')}（本機已記低，可以再試）</div>`;
+      }
       /* ★ 同一份 → Scout Admin「問題回報 TICK」（合約：type:'issue' ＋ 8 個欄位） */
       const btn = gate.querySelector('#rs-go');
       btn.disabled = true; btn.textContent = '送去旅部／ADMIN…';

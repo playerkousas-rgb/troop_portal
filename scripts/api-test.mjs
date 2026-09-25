@@ -88,6 +88,12 @@ t('proxy：GAS action 白名單存在；唔喺白名單／未設定 env → 誠�
   assert(!proxy.GAS_WHITELIST.includes('exportAll') && !proxy.GAS_WHITELIST.includes('importAll'), 'exportAll／importAll 唔應該開放俾前端');
   assert(!proxy.GAS_WHITELIST.includes('login'), 'login 屬 /api/auth，唔應該經 proxy');
 });
+t('proxy：破壞性 action 只有旅長做得（deleteRow／saveDbPart／purgeTombstones）', () => {
+  ['deleteRow', 'saveDbPart', 'purgeTombstones'].forEach(a => assert(proxy.CHIEF_ONLY.includes(a), `${a} 應該係旅長專用`));
+  ['testDownstream', 'openAccountForDownstream'].forEach(a => assert(proxy.LEADER_ACTIONS.includes(a), `${a} 應該係旅長／教練員`));
+  ['resetPassword', 'deleteUser', 'setUserStatus', 'upsertUser'].forEach(a => assert(proxy.CHIEF_ONLY.includes(a), `${a} 應該係旅長專用`));
+  assert(proxy.GAS_WHITELIST.includes('getTombstones') && !proxy.GAS_WHITELIST.includes('exportAll'), '墓碑讀得、匯出唔可以經前端');
+});
 t('proxy：apikey 只喺 server 側（原始碼掃描）', async () => {
   const src = (await import('node:fs')).readFileSync(new URL('../api/proxy.js', import.meta.url), 'utf8');
   assert(/process\.env\[`TROOP_\$\{unit\}_APIKEY`\]/.test(src), 'apikey 應該只由 env 讀');
@@ -126,6 +132,88 @@ t('唔會把密碼寫入回應或 log（原始碼掃描）', async () => {
     assert(!/console\.log\([^)]*password/i.test(src), f + ' 疑似 log 密碼');
     assert(!/JSON\.stringify\(\s*\{[^}]*password\s*:/.test(src), f + ' 疑似回應帶密碼');
   });
+});
+
+/* ⑨ 公開分享連結（P1） */
+const shareApi = await import('../api/share.js');
+t('分享連結：通告／活動先簽得；改一個字即驗唔到；過期即失效；最長 90 日', () => {
+  const secret = 'share-secret-test';
+  const r = shareApi.signShare({ kind: 'notice', unit: '82', id: 'n-1', to: 'sc0082' }, secret);
+  assert(r.ok && r.token.includes('.'), '簽唔到：' + JSON.stringify(r));
+  const v = shareApi.verifyShare(r.token, secret);
+  assert(v.ok && v.payload.id === 'n-1' && v.payload.kind === 'notice', '驗唔到：' + JSON.stringify(v));
+  eq(shareApi.verifyShare(r.token, 'other-secret').ok, false, '換 key 應該唔通');
+  const [p1, sig] = r.token.split('.');
+  eq(shareApi.verifyShare(p1 + 'x.' + sig, secret).ok, false, '改 payload 應該唔通');
+  eq(shareApi.verifyShare(p1 + '.' + sig.slice(0, -2) + 'aa', secret).ok, false, '改簽名應該唔通');
+  const expired = shareApi.signShare({ kind: 'notice', unit: '82', id: 'n-1', exp: Date.now() - 1000 }, secret);
+  assert(shareApi.verifyShare(expired.token, secret).ok === false, '過期竟然通');
+  const bad = shareApi.signShare({ kind: 'photo', unit: '82', id: 'x' }, secret);
+  assert(bad.ok === false && /notice／calendar/.test(bad.error), '種類白名單冇擋（物資／相簿唔開放）');
+  const long = shareApi.signShare({ kind: 'calendar', unit: '82', id: 'e-1', exp: Date.now() + 365 * 24 * 3600 * 1000 }, secret);
+  assert(long.payload.exp - Date.now() <= shareApi.MAX_TTL_MS + 1000, '最長 90 日冇封頂');
+  assert(!shareApi.pageFor('calendar', long.payload).includes('notice'), '活動連結唔應該去通告頁');
+  assert(!/key|apikey/i.test(shareApi.pageFor('notice', long.payload)), 'URL 唔應該帶 key');
+});
+t('分享連結：冇 SHARE_SECRET／SESSION_SECRET ＝ fail closed', () => {
+  const r = shareApi.signShare({ kind: 'notice', unit: '82', id: 'n-1' }, '');
+  assert(r.ok === false && /未設定/.test(r.error), '冇密鑰竟然簽得出');
+});
+
+/* ⑩ 成員入口導流（P1）＋唔做帳號枚舉 */
+const me = await import('../api/member-entry.js');
+t('成員入口：接駁好＋綠燈＋測過＝M1 一次登入；否則 M3；搵唔到＝none（老實講）', () => {
+  eq(me.routeForDownstream({ linked: true, status: 'green', tested: true }), 'one-stop');
+  eq(me.routeForDownstream({ linked: true, status: 'green', tested: false }), 'two-stop', '未測過連線唔應該當 M1');
+  eq(me.routeForDownstream({ linked: true, status: 'amber', tested: true }), 'two-stop');
+  eq(me.routeForDownstream({}), 'two-stop');
+});
+t('成員入口：原始碼掃描 —— 唔准回答「email 有冇戶口」（唔做枚舉）', async () => {
+  const src = (await import('node:fs')).readFileSync(new URL('../api/member-entry.js', import.meta.url), 'utf8');
+  assert(/唔會.*帳號枚舉/.test(src), '要寫明唔做枚舉');
+  assert(!/authUser/.test(src), 'member-entry 唔應該查帳號（authUser 會曝露存在性）');
+  assert(!/found:\s*true/.test(src), '唔應該回「搵到呢個人」');
+});
+
+/* ⑪ 能力註冊表（P1） */
+const regApi = await import('../api/registry.js');
+t('註冊表：閂咗＝一律唔得；custom＝只限名單；all＝人人得（閂＝隱藏唔刪）', () => {
+  const rows = [
+    { id: 'notices', mode: 'all' },
+    { id: 'finance', mode: 'off' },
+    { id: 'inventory', mode: 'custom', branches: ['sc0082', 'VS0082'] }
+  ];
+  const m = regApi.moduleState(rows);
+  eq(m.notices.mode, 'all'); eq(m.finance.mode, 'off');
+  assert(regApi.allowedFor(m.notices, 'cs0082') === true, 'all 應該人人得');
+  assert(regApi.allowedFor(m.finance, 'cs0082') === false, 'off 應該一律唔得');
+  assert(regApi.allowedFor(m.inventory, 'sc0082') === true, 'custom 名單內要用得');
+  assert(regApi.allowedFor(m.inventory, 'VS0082') === true, '名單比對要唔分大小寫');
+  assert(regApi.allowedFor(m.inventory, 'cs0082') === false, 'custom 名單外要唔得');
+  assert(regApi.allowedFor(null, 'sc0082') === false, '冇紀錄＝當冇開');
+});
+
+/* ⑫ 旅聚合／分層 cache（P1） */
+const troopApi = await import('../api/troop.js');
+t('旅聚合：分層 cache ＝ 5／30 分鐘；強制刷新繞過 cache；cache 唔會串旅', () => {
+  eq(troopApi.CACHE_TIERS.fast, 5); eq(troopApi.CACHE_TIERS.slow, 30);
+  eq(troopApi.tierOf('旅通告'), 'fast'); eq(troopApi.tierOf('物資整合'), 'slow');
+  eq(troopApi.tierOf('財務整合'), 'slow'); eq(troopApi.tierOf('旅行事曆'), 'fast');
+  troopApi.cachePut('82', '旅通告', [{ id: 'n-1' }], 1000);
+  assert(troopApi.cacheGet('82', '旅通告', { now: 1000 + 4 * 60 * 1000 }) !== null, '5 分鐘內應該命中');
+  assert(troopApi.cacheGet('82', '旅通告', { now: 1000 + 6 * 60 * 1000 }) === null, '過 5 分鐘應該要重拉');
+  assert(troopApi.cacheGet('82', '旅通告', { fresh: true, now: 1000 }) === null, '強制刷新要繞過 cache');
+  troopApi.cachePut('82', '物資整合', [{ id: 'i-1' }], 1000);
+  assert(troopApi.cacheGet('82', '物資整合', { now: 1000 + 29 * 60 * 1000 }) !== null, '30 分鐘 tier 唔應該咁快過期');
+  assert(troopApi.cacheGet('83', '旅通告', { now: 1500 }) === null, '唔可以串到第二個旅');
+  troopApi.cacheClear('82');
+  assert(troopApi.cacheGet('82', '物資整合', { now: 1500 }) === null, 'cacheClear 要清乾淨');
+});
+t('旅聚合：唔會回 URL／KEY（對下游只讀 registry）', async () => {
+  const src = (await import('node:fs')).readFileSync(new URL('../api/troop.js', import.meta.url), 'utf8');
+  assert(/_URL|_KEY/.test(src) === false, 'troop.js 唔應該接觸 DOWNSTREAM_*_URL／_KEY');
+  const pulled = await troopApi.pullTables('99', { gas: async () => ({ ok: false, code: 'not_configured', msg: 'x' }) }, { tables: ['旅通告'], fresh: true });
+  assert(pulled.ok === false && pulled.code === 'not_configured', '未設定 env 要誠實失敗');
 });
 
 console.log('');

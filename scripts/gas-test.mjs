@@ -36,6 +36,7 @@ function makeRange(sh, r, c, nr, nc) {
 }
 class FakeSheet {
   constructor(name) { this.name = name; this.grid = []; }
+  getName() { return this.name; }
   cell(r, c) { const row = this.grid[r - 1] || []; return row[c - 1] === undefined ? '' : row[c - 1]; }
   setCell(r, c, v) { while (this.grid.length < r) this.grid.push([]); const row = this.grid[r - 1]; while (row.length < c) row.push(''); row[c - 1] = v === null || v === undefined ? '' : v; }
   getLastRow() { let last = 0; this.grid.forEach((row, i) => { if (row.some(v => v !== '' && v !== undefined)) last = i + 1; }); return last; }
@@ -48,7 +49,9 @@ class FakeSpreadsheet {
   constructor() { this.sheets = new Map(); }
   getName() { return '假旅 SHEET（測試）'; }
   getSheetByName(n) { return this.sheets.get(n) || null; }
+  getSheets() { return [...this.sheets.values()]; }
   insertSheet(n) { const s = new FakeSheet(n); this.sheets.set(n, s); return s; }
+  deleteSheet(sh) { this.sheets.delete(sh.getName()); }
 }
 const b64 = buf => Buffer.from(buf).toString('base64');
 function makeSandbox({ fetchImpl } = {}) {
@@ -348,6 +351,167 @@ t('後端實況：表數／行數／鏈狀態如實報（唔報喜唔報憂）',
   assert(info.tables.length >= 20 && typeof info.rows === 'number', 'dbInfo 唔齊');
   assert(info.chain && info.chain.ok === true, '鏈應該係好嘅');
   assert(info.properties.downstreams === 0 && info.properties.apiKey === true, '屬性統計唔啱');
+});
+
+/* ⑫ 支部註冊表／燈號（P1 §10-2/3） */
+t('registry：紅黃綠三態（未測＝黃；測唔到＝紅；測到＝綠）＋永不外洩 URL／KEY', () => {
+  const { G, props } = makeSandbox(); G.initializeSheets();
+  const key = props.get('API_KEY');
+  G.registerDownstream({ id: 'vs0082', url: 'https://script.google.com/macros/s/AAA/exec', key: 'troop_downstream_secret', name: '深資童軍團' });
+  let r = call(G, { action: 'registry', apikey: key });
+  eq(r.data[0].status, 'amber', '未測過連線＝黃燈');
+  assert(!JSON.stringify(r).includes('troop_downstream_secret') && !JSON.stringify(r).includes('/exec'), 'registry 外洩');
+  /* 測試連線：下游唔存在（假環境回 404）→ 紅 */
+  call(G, { action: 'testDownstream', apikey: key, id: 'vs0082' });
+  r = call(G, { action: 'registry', apikey: key });
+  eq(r.data[0].status, 'red', '測唔到＝紅燈');
+  assert(/失敗/.test(r.data[0].note), '紅燈要講原因');
+  /* 手動紅／綠：進度 sig 路徑未起好之前靠人手 */
+  const set = call(G, { action: 'setUnitStatus', apikey: key, id: 'vs0082', status: 'green', note: '教練員電話確認' });
+  assert(set.success === true, '設定燈號失敗：' + JSON.stringify(set));
+  r = call(G, { action: 'registry', apikey: key });
+  eq(r.data[0].status, 'green', '手動綠燈要用得');
+  eq(r.data[0].note, '教練員電話確認', '要保留原因');
+  const bad = call(G, { action: 'setUnitStatus', apikey: key, id: 'vs0082', status: '藍' });
+  assert(bad.success === false, '亂填燈號竟然收');
+});
+t('分享：發起要標題同對象；落 `分享` 表；審計記低', () => {
+  const { G, props } = makeSandbox(); G.initializeSheets();
+  const key = props.get('API_KEY');
+  const bad = call(G, { action: 'saveShare', apikey: key, share: { to: ['sc0082'] } });
+  assert(bad.success === false && bad.code === 'bad_share', '冇標題竟然收');
+  const okr = call(G, { action: 'saveShare', apikey: key, share: { title: '中秋露營', kind: 'calendar', to: ['sc0082', 'cs0082'], state: 'pending' } });
+  assert(okr.success === true && okr.data.to.length === 2, '發起分享失敗：' + JSON.stringify(okr));
+  const rows = G.readTable_('分享');
+  eq(rows.length, 1); eq(rows[0].state, 'pending', '未接收＝pending');
+  const audit = G.readTable_('審計紀錄').map(a => a.action).join(',');
+  assert(audit.includes('發起分享'), '審計冇記');
+});
+t('求救落 SHEET：免登入都寫得；重複 id 冪等；內容長度收斂', () => {
+  const { G } = makeSandbox({ fetchImpl: (u) => (u.includes('/api/super') ? { getResponseCode: () => 200, getContentText: () => JSON.stringify({ success: true, data: {} }) } : null) });
+  G.initializeSheets();
+  const r1 = call(G, { action: 'saveRescue', rescue: { id: 'rs-1', title: '登入唔到', note: 'x'.repeat(3000), by: '曾國強', contact: '91234567', kind: 'login' } });
+  assert(r1.success === true && r1.data.id === 'rs-1', '求救寫入失敗：' + JSON.stringify(r1));
+  const rows = G.readTable_('求救');
+  eq(rows[0].note.length, 2000, '詳情要截到 2000 字');
+  eq(rows[0].state, 'open');
+  const r2 = call(G, { action: 'saveRescue', rescue: { id: 'rs-1', title: '再送一次', note: 'dup' } });
+  assert(r2.success === false && r2.code === 'duplicate', '重複送出竟然收（唔冪等）');
+  const r3 = call(G, { action: 'saveRescue', rescue: { title: '', note: 'x' } });
+  assert(r3.success === false && r3.code === 'bad_rescue', '冇標題竟然收');
+  /* 匿名限流：同一個 IP 每個鐘最多 3 單（第四單要拒，唔可以無限灌） */
+  const same = { ip: '7.7.7.7' };
+  call(G, { action: 'saveRescue', rescue: { id: 'q-1', title: 'a', note: 'b' } }, same);
+  call(G, { action: 'saveRescue', rescue: { id: 'q-2', title: 'a', note: 'b' } }, same);
+  call(G, { action: 'saveRescue', rescue: { id: 'q-3', title: 'a', note: 'b' } }, same);
+  const q4 = call(G, { action: 'saveRescue', rescue: { id: 'q-4', title: 'a', note: 'b' } }, same);
+  assert(q4.success === false && q4.code === 'rate_limited', '匿名灌單竟然唔擋：' + JSON.stringify(q4));
+  /* 其他人／其他 IP 唔受影響 */
+  const other = call(G, { action: 'saveRescue', rescue: { id: 'q-5', title: 'a', note: 'b' } }, { ip: '8.8.8.8' });
+  assert(other.success === true, '唔應該連其他人一齊擋');
+});
+
+/* ⑬ 大庫分件 ＋ tombstone（P1 §10-7） */
+t('大庫分件：超 rowsPerWrite 自動切件；讀嘅時候合返；細返就清走舊分件', () => {
+  const { G, props, spread } = makeSandbox(); G.initializeSheets();
+  const key = props.get('API_KEY');
+  G.LIMITS.rowsPerWrite = 100;                       // 測試用細上限
+  const rows = [];
+  for (let i = 0; i < 250; i++) rows.push({ id: 'n-' + i, title: '通告 ' + i });
+  const w = call(G, { action: 'saveTable', apikey: key, table: '旅通告', rows });
+  assert(w.success === true, '分件寫入失敗：' + JSON.stringify(w).slice(0, 200));
+  const parts = [...spread.sheets.keys()].filter(k => k.startsWith('旅通告#'));
+  eq(parts.length, 3, '250 行／100 ＝ 3 件');
+  eq(G.readTableAll_('旅通告').length, 250, '分段讀要合返 250 行');
+  const back = call(G, { action: 'load', apikey: key, table: '旅通告' });
+  eq(back.data.length, 250, 'API 讀取都要合返');
+  /* 縮返細 → 舊分件清走 */
+  call(G, { action: 'saveTable', apikey: key, table: '旅通告', rows: rows.slice(0, 10) });
+  eq([...spread.sheets.keys()].filter(k => k.startsWith('旅通告#')).length, 0, '細返要清走分件');
+  eq(G.readTableAll_('旅通告').length, 10, '唔可以殘留舊分件行');
+  G.LIMITS.rowsPerWrite = 20000;
+});
+t('saveDbPart：前端可以自己分件寫（part 0＝主分頁）＋ reset 清舊件', () => {
+  const { G, props, spread } = makeSandbox(); G.initializeSheets();
+  const key = props.get('API_KEY');
+  const r1 = call(G, { action: 'saveDbPart', apikey: key, table: '財務整合', part: 1, rows: [{ id: 'f-1' }, { id: 'f-2' }] });
+  assert(r1.success === true && r1.data.sheet === '財務整合#1', '分件寫入失敗：' + JSON.stringify(r1));
+  const r2 = call(G, { action: 'saveDbPart', apikey: key, table: '財務整合', part: 2, rows: [{ id: 'f-3' }] });
+  assert(r2.success === true, '第二件寫唔入');
+  eq(G.readTableAll_('財務整合').length, 3, '分段讀要合返');
+  const r3 = call(G, { action: 'saveDbPart', apikey: key, table: '財務整合', part: 0, reset: true, rows: [{ id: 'f-9' }] });
+  assert(r3.success === true, 'reset 失敗');
+  assert(![...spread.sheets.keys()].some(k => k.startsWith('財務整合#')), 'reset 應該清走分件');
+  eq(G.readTableAll_('財務整合').length, 1, 'reset 後只剩主分頁嗰行');
+  const bad = call(G, { action: 'saveDbPart', apikey: key, table: '財務整合', part: 99, rows: [] });
+  assert(bad.success === false && bad.code === 'bad_part', '亂填件號竟然收');
+});
+t('刪除＝tombstone：刪一行會留墓碑（邊個、幾時、為咩）；90 日後 purge 清走', () => {
+  const { G, props } = makeSandbox(); G.initializeSheets();
+  const key = props.get('API_KEY');
+  call(G, { action: 'saveTable', apikey: key, table: '旅通告', rows: [{ id: 'n-1' }, { id: 'n-2' }] });
+  const del = call(G, { action: 'deleteRow', apikey: key, table: '旅通告', rowId: 'n-1', reason: '重複發佈' });
+  assert(del.success === true && del.data.tombstone === true, '刪除失敗：' + JSON.stringify(del));
+  eq(G.readTableAll_('旅通告').length, 1, '刪完應該剩一行');
+  const tm = call(G, { action: 'getTombstones', apikey: key });
+  eq(tm.data.length, 1, '應該有一個墓碑');
+  eq(tm.data[0].rowId, 'n-1'); eq(tm.data[0].reason, '重複發佈');
+  assert(tm.data[0].by && tm.data[0].at, '墓碑要記低邊個／幾時');
+  const again = call(G, { action: 'deleteRow', apikey: key, table: '旅通告', rowId: 'n-1' });
+  assert(again.success === false && again.code === 'no_row', '刪第二次唔應該當成功');
+  /* purge：改舊個墓碑時間，purge 要清走 */
+  const sh = G.ss_().getSheetByName('_tombstone');
+  sh.setCell(2, 5, '2020-01-01 00:00');
+  const p = call(G, { action: 'purgeTombstones', apikey: key });
+  eq(p.data.purged, 1, '過期墓碑要清走');
+  eq(call(G, { action: 'getTombstones', apikey: key }).data.length, 0, '清完應該冇');
+});
+
+/* ⑭ 權限封頂（下級 ⊆ 上級；BUILD §3、落差 #9） */
+t('權限封頂：教練員唔可以授旅長／系統權限（如實回報 clamped，唔會靜靜放寬）', () => {
+  const { G, props } = makeSandbox(); G.initializeSheets();
+  const key = props.get('API_KEY');
+  const h = 'f'.repeat(64);
+  call(G, { action: 'saveTable', apikey: key, table: '旅員', rows: [
+    { id: 'u-coach', email: 'coach@demo.hk', role: 'coach', status: 'active', hash: h, salt: 'salt12345' },
+    { id: 'u-mem', email: 'mem@demo.hk', role: 'member', status: 'active', hash: h, salt: 'salt12345' }
+  ] });
+  /* 教練員（asUser）想授 system_all（只有旅長有）→ 要 clamp */
+  const r = call(G, { action: 'updatePermissions', apikey: key, asUser: 'coach@demo.hk', id: 'u-mem', perms: ['notice_publish', 'system_all', 'module_toggle'] });
+  assert(r.success === true, '請求本身應該成功（只係封頂）：' + JSON.stringify(r));
+  const u = r.data.user;
+  assert(u.perms.includes('notice_publish'), '教練員有嘅權限應該授得');
+  assert(!u.perms.includes('system_all') && !u.perms.includes('module_toggle'), '超出層級嘅權限唔可以授：' + JSON.stringify(u.perms));
+  eq((u.clamped.perms || []).sort().join(','), 'module_toggle,system_all', '要如實列出被擋嘅權限');
+  assert(r.data.note && /封頂/.test(r.data.note), '要講明已封頂');
+  /* 角色昇級：教練員唔可以授 chief */
+  const r2 = call(G, { action: 'updateUserRole', apikey: key, asUser: 'coach@demo.hk', id: 'u-mem', role: 'chief' });
+  eq(r2.data.user.role, 'coach', '唔可以授唔低過自己嘅角色');
+  assert(r2.data.clamped.role.length === 1, '要回報角色被擋');
+  /* 旅長可以授自己層級內嘅 */
+  const r3 = call(G, { action: 'updatePermissions', apikey: key, asUser: 'coach@demo.hk', id: 'u-mem', role: 'coach', perms: ['notice_publish'] });
+  assert(r3.success === true, '正常授權應該得');
+  /* ★ fail closed：帶咗 asUser 但搵唔到人（或者停用）→ 當最低權限，唔會當超管 */
+  const r4 = call(G, { action: 'updatePermissions', apikey: key, id: 'u-mem', perms: ['system_all'], asUser: 'ghost@nowhere.hk' });
+  const c4 = r4.data && (r4.data.clamped || (r4.data.user && r4.data.user.clamped));
+  assert(c4 && (c4.perms || []).includes('system_all'), '未知 asUser 竟然授得系統權限（大漏洞）');
+  const r5 = call(G, { action: 'updatePermissions', apikey: key, id: 'u-mem', perms: ['system_all'], asUser: 'coach@demo.hk' });
+  assert(r5.success === true, '教練員請求應該回成功（只係封頂）');
+  const c5 = r5.data.clamped || (r5.data.user && r5.data.user.clamped);
+  assert(c5 && (c5.perms || []).includes('system_all'), '教練員唔應該授到系統權限');
+});
+t('有效權限：角色 ∪ 逐人加；逐人加嘅一樣封頂；讀取唔外洩 hash', () => {
+  const { G, props } = makeSandbox(); G.initializeSheets();
+  const key = props.get('API_KEY');
+  const h = 'a'.repeat(64);
+  call(G, { action: 'saveTable', apikey: key, table: '旅員', rows: [
+    { id: 'u-1', email: 'c@demo.hk', role: 'coach', perms: ['system_all', 'audit_view'], status: 'active', hash: h, salt: 'salt12345' }
+  ] });
+  const r = call(G, { action: 'load', apikey: key, table: '旅員' });
+  const u = r.data[0];
+  assert(u.effectivePerms.includes('audit_view'), '角色本身有嘅要有');
+  assert(!u.effectivePerms.includes('system_all'), '逐人加但超出角色嘅要擋');
+  assert(u.hash === undefined && u.salt === undefined && u.setupToken === undefined, '讀取唔可以外洩敏感欄');
 });
 
 /* 收尾 */
