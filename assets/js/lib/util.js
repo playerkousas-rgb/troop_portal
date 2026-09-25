@@ -117,6 +117,8 @@ const ICONS = {
   print: 'M7 9V3h10v6M5 9h14v7h-3M8 16H5v5h14v-5h-3M8 21v-6h8v6',
   key: 'M14 10a4 4 0 1 0-3.5 4l1.5-1.5h2v-2h2v-2h-2zM3 21l5-5',
   lock: 'M6 11h12v10H6zM9 11V7a3 3 0 0 1 6 0v4',
+  unlock: 'M6 11h12v10H6zM9 11V7a3 3 0 0 1 6 0',
+  power: 'M12 3v9M7.5 6.2a7 7 0 1 0 9 0',
   eye: 'M2 12s4-6 10-6 10 6 10 6-4 6-10 6-10-6-10-6zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
   warn: 'M12 3l9 17H3zM12 9v5M12 17h.01',
   mail: 'M3 6h18v12H3zM3 7l9 6 9-6',

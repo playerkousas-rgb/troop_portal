@@ -15,7 +15,7 @@
 
 import { commit, currentUser, load, setSession, clearSession, getSession, userById } from './store.js';
 import { toast, normId } from './util.js';
-import { ROLE_LABEL, identityMeta, titleMeta, ageFromDob, ageGroupOf } from './registry.js';
+import { ROLE_LABEL, identityMeta, titleMeta, ageFromDob, ageGroupOf, gateOfLink, gateMeta } from './registry.js';
 
 export const DEMO_PASSWORD = 'demo1234';
 
@@ -99,19 +99,31 @@ export function branchEntryStatus(branchId) {
   const b = load().branches.find(x => x.id === branchId);
   if (!b) return { ok: false, state: 'red', msg: '搵唔到呢個團' };
   const st = b.link?.state || 'red';
+  const gate = gateOfLink(b.link);
+  /* ★ 支部系統閘：「被關」＝一律唔入得（連旅入口都擋）；由旅側登記版面控制。
+     （被關係比「未登記」更強嘅狀態：登記過嘅支部先可以被關。） */
+  if (gate === 'closed' && b.link?.registeredAt) {
+    return {
+      ok: false, state: 'red', gate, branch: b,
+      msg: `「${b.name}」嘅支部系統已經「被關」（${b.link?.gateNote || '未寫原因'}）—— 呢個閘由旅側控制，連旅入口都暫時唔入得。`
+        + `${b.link?.gateBy ? `（由 ${b.link.gateBy} 於 ${b.link.gateAt || ''} 關上）` : ''}`
+        + `要開返：支部 → 揀該團 →「接駁與登記」→ 支部系統閘 → 開放／閂口。`
+    };
+  }
+  const gm = gateMeta(gate);
   if (st === 'red') {
     return {
-      ok: false, state: 'red',
+      ok: false, state: 'red', gate,
       msg: `「${b.name}」未登記下游 SHEET —— 旅讀唔到該團資料，所以由旅窗口入唔到。請旅長先去「支部 → 接駁與登記」登記（URL ＋ KEY ＋ sig 用途）再試。`
     };
   }
-  if (st === 'yellow') {
+  if (gate === 'open' || st === 'yellow') {
     return {
-      ok: true, state: 'yellow', branch: b,
-      note: `「${b.name}」已登記但未閂本地登入（黃燈）：可以入，但兩邊都仲可以自己登入 —— 搬完數記得閂口。`
+      ok: true, state: 'yellow', gate, branch: b,
+      note: `「${b.name}」已登記但閘仍然「開放」（黃燈）：本地直接入得，旅入口亦入得 —— 搬完數記得閂口（只收 sig）。`
     };
   }
-  return { ok: true, state: 'green', branch: b, note: `「${b.name}」已接駁（綠燈）` };
+  return { ok: true, state: 'green', gate, branch: b, note: `「${b.name}」已接駁（綠燈）· 閘＝${gm.label}` };
 }
 
 /** 該團嘅入口 URL（真模式：轉去該團系統；旅唔會、亦唔可以代驗支部密碼） */

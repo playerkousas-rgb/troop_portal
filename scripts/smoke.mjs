@@ -129,8 +129,9 @@ await test('支部人員：未登記下游嘅團 ＝ 入唔到（誠實失敗）
   assert(r.msg.includes('未登記下游'), '錯誤訊息冇講清楚原因');
   const g = A.branchEntryStatus('vs0082');       // 綠燈
   assert(g.ok === true && g.state === 'green', '綠燈支部應該入得');
-  const y = A.branchEntryStatus('sc0082');       // 黃燈
-  assert(y.ok === true && y.state === 'yellow' && y.note.includes('未閂'), '黃燈應該入得但要提醒');
+  const y = A.branchEntryStatus('sc0082');       // 黃燈（閘仍然開放）
+  assert(y.ok === true && y.state === 'yellow' && y.gate === 'open', '黃燈（閘開放）應該入得但要提醒');
+  assert(y.note.includes('開放'), '黃燈提醒冇講閘仍然開放');
   const hint = A.memberEntryHint('gs0082', 'YMIS-2007');
   assert(hint.ok === false, 'memberEntryHint 冇跟住擋');
 });
@@ -357,6 +358,66 @@ await test('分享：物主／團長可以撤回未接收嘅分享', async () =>
   assert(btn, '物主冇撤回掣');
   btn.click();
   assert(S.shares().find(x => x.id === 'sh-7').state === 'withdrawn', '撤回冇寫入');
+});
+
+await test('★ 支部系統閘：三態 ＋ 被關＝連旅入口都擋（由旅側控制）', async () => {
+  assert(R.gateOfLink({ localLogin: true }) === 'open', '舊資料推導（開）唔啱');
+  assert(R.gateOfLink({ localLogin: false }) === 'sig-only', '舊資料推導（閂）唔啱');
+  assert(R.gateMeta('closed').tone === 'r', '被關應該係紅');
+
+  /* 示範：樂行童軍團已經被關（有原因） */
+  const c = A.branchEntryStatus('rs0082');
+  assert(c.ok === false && c.gate === 'closed', '被關嘅支部竟然入得');
+  assert(c.msg.includes('被關') && c.msg.includes('裝修'), '被關訊息冇講原因');
+
+  /* 旅長閂口 / 被關 / 開放：只有旅長有權 */
+  A.loginAs('u-chief');
+  assert(R.can('chief', 'branch_link_edit') && !R.can('coach', 'branch_link_edit'), '權限判斷唔啱');
+  S.setBranchGate('sc0082', 'sig-only');
+  assert(S.branchGate('sc0082') === 'sig-only' && S.load().branches.find(b => b.id === 'sc0082').link.localLogin === false, '閂口冇寫入');
+  assert(A.branchEntryStatus('sc0082').ok === true && A.branchEntryStatus('sc0082').state === 'green', '閂口之後應該入得（經 sig）');
+  S.setBranchGate('sc0082', 'closed', { note: '測試：臨時被關' });
+  assert(S.load().branches.find(b => b.id === 'sc0082').link.state === 'green', '被關唔應該當成未接駁');
+  const st = A.branchEntryStatus('sc0082');
+  assert(st.ok === false && st.gate === 'closed', '被關之後竟然入得');
+  const u = S.load().users.find(x => x.id === 'u-m-minor');
+  const r = A.login(u.email, A.DEMO_PASSWORD);
+  assert(r.ok === false && r.msg.includes('被關'), '被關支部嘅帳號竟然登入得到');
+  /* 開返：要寫原因嘅被關 → 開放後照入得 */
+  S.setBranchGate('sc0082', 'open');
+  assert(A.branchEntryStatus('sc0082').ok === true && A.branchEntryStatus('sc0082').gate === 'open', '開放返之後應該入得');
+  S.setBranchGate('sc0082', 'open');      // 還原示範狀態（閘開放）
+  assert(S.load().branches.find(x => x.id === 'sc0082').link.gateNote === '', '開放之後唔應該留住原因');
+});
+
+await test('★ 支部系統閘：未登記下游 ＝ 改唔到（唔會扮成功）', async () => {
+  A.loginAs('u-chief');
+  const before = S.branchGate('gs0082');
+  const r = S.setBranchGate('gs0082', 'closed', { note: '唔應該改到' });
+  assert(r.ok === false && r.msg.includes('未登記下游'), '未登記下游竟然當成功');
+  const after = S.load().branches.find(x => x.id === 'gs0082');
+  assert(after.link.state === 'red', '未登記下游唔應該因為改閘而變色');
+  assert(after.link.gate === 'open', '未登記下游嘅閘唔應該被改');
+  assert(A.branchEntryStatus('gs0082').msg.includes('未登記下游'), '未登記嘅訊息唔應該變');
+  assert(before === 'open', '示範起始狀態唔啱');
+});
+
+await test('★ 支部系統閘：UI 有控制面（旅長見掣、教練員冇）', async () => {
+  A.loginAs('u-chief');
+  main.boot();
+  fireHash(w, '#/branch/sc0082?tab=link');
+  const v = document.getElementById('view');
+  assert(v.textContent.includes('支部系統閘'), '接駁頁冇「支部系統閘」卡');
+  assert(v.querySelector('[data-gate="sc0082"][data-g="closed"]'), '冇「被關」掣');
+  assert(v.textContent.includes('setGate'), '冇顯示 sig write action');
+  fireHash(w, '#/branch/rs0082?tab=link');
+  assert(document.getElementById('view').textContent.includes('裝修'), '被關原因冇顯示');
+  A.loginAs('u-lee');                     // 教練員
+  main.boot();
+  fireHash(w, '#/branch/sc0082?tab=link');
+  const v2 = document.getElementById('view');
+  assert(!v2.querySelector('[data-gate]'), '教練員唔應該有閘掣');
+  assert(v2.textContent.includes('唔可以改閘'), '冇講明冇權');
 });
 
 await test('★ 支部版面：旅側唔另設，各支部自家版面之後照抄（有接入位）', async () => {

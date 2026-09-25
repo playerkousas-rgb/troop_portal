@@ -319,6 +319,26 @@ export const can = (role, perm) => (PERMS[role] || []).includes(perm);
 /** ★ 分享嘅接收／退回：該支部執委或以上（rank ≥ 3）；旅長／教練員可以代勞 */
 export const canDecideShare = (role, rank = 0) => ['chief', 'coach'].includes(role) || Number(rank) >= 3;
 
+/* ============================================================
+   支部系統閘（★ 用戶定案 2026-09-25）
+   ------------------------------------------------------------
+   支部系統會實作「被關」，但**嗰邊冇掣** —— 所以閂／唔閂由**旅側登記版面**控制。
+   三態（fail-closed：讀唔到下游 ＝ 當閂，唔會當開）：
+     open     開放：本地直接入得（過渡期用；黃燈）
+     sig-only 閂口：只收上游 sig，旅入口照入（完成後嘅標準狀態；綠燈）
+     closed   被關：一律唔入得（維修／停用）—— 連旅入口都暫時擋，要寫原因（紅燈）
+   ============================================================ */
+export const GATE_STATES = {
+  open: { id: 'open', label: '開放', tone: 'y', desc: '本地直接入得（過渡期）；旅入口照入' },
+  'sig-only': { id: 'sig-only', label: '閂口（只收 sig）', tone: 'g', desc: '前端直接登入已閂；只有旅經 sig 入得' },
+  closed: { id: 'closed', label: '被關（維修／停用）', tone: 'r', desc: '一律唔入得 —— 連旅入口都暫時擋' }
+};
+export const gateMeta = g => GATE_STATES[g] || GATE_STATES.open;
+/** 由舊欄位推返閘狀態（舊資料只有 localLogin） */
+export const gateOfLink = link => link?.gate || (link?.localLogin ? 'open' : 'sig-only');
+/** 呢個閘狀態下，旅入口／本地入口仲入唔入得 */
+export const gateAllowsEntry = g => g !== 'closed';
+
 /** ★ 分享種類：只做兩樣（2026-09-25 用戶定案）—— 通告 ＋ 活動（行事曆）
     其他種類（物資／進度／相簿／教材）留住個 kind 欄，但 UI 唔開，之後先加。 */
 export const SHARE_KINDS = [

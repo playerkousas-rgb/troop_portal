@@ -9,7 +9,7 @@
 
 import { makeDemo } from './demo.js';
 import { deepClone, toast } from './util.js';
-import { defaultRankFor } from './registry.js';
+import { defaultRankFor, gateOfLink } from './registry.js';
 
 const K_DATA = 'troop.demo.db.v1';
 const K_SESSION = 'troop.session.v1';
@@ -119,6 +119,40 @@ export const visibleUsers = () => users().filter(u => !u.hidden);
 /** 支部人員（團長／副團長／成員）嘅所屬支部 */
 export const myBranchId = () => session?.branchId || null;
 export const myBranch = () => (session?.branchId ? branchById(session.branchId) : null);
+/** ★ 支部系統閘（open／sig-only／closed）—— 由旅側登記版面控制；支部系統嗰邊冇掣。
+    真模式：呢一步係 sig write action `setGate`（下游寫入 ALLOW_LOCAL_LOGIN／GATE，回 confirmed）。
+    fail-closed：下游未登記（紅燈）＝ 改唔到，亦唔會當成功。 */
+export function setBranchGate(branchId, gate, { note = '', by = null, silent = false } = {}) {
+  const u = by || currentUser();
+  const at = nowStr();
+  const b0 = branchById(branchId);
+  /* fail-closed：未登記下游 ＝ 改唔到（唔會扮成功） */
+  if (!b0) return { ok: false, msg: '搵唔到呢個支部' };
+  if (!b0.link?.registeredAt || b0.link.state === 'red') {
+    return { ok: false, msg: `「${b0.name}」未登記下游 SHEET —— 控制唔到該團嘅閘。請先「改登記」（URL ＋ KEY ＋ sig 用途）。` };
+  }
+  const res = commit(d => {
+    const t = (d.branches || []).find(x => x.id === branchId);
+    if (!t || !t.link) return;
+    t.link.gate = gate;
+    t.link.localLogin = gate === 'open';           // 舊欄位同步（向下兼容）
+    /* 灯跟「接駁健康度」：閂口／被關都唔應該當未接駁（被關係一個獨立狀態，用 gate 表示） */
+    t.link.state = gate === 'closed' ? (t.link.registeredAt ? 'green' : 'red') : (gate === 'open' ? 'yellow' : 'green');
+    t.link.gateBy = u?.name || getSession()?.email || '';
+    t.link.gateAt = at;
+    t.link.gateNote = gate === 'closed' ? (note || '') : '';
+    t.link.note = gate === 'open' ? '本地入口開放（過渡期）'
+      : gate === 'closed' ? `被關：${note || '（未寫原因）'}`
+        : '已接駁，本地入口已閂（只收 sig）';
+  }, { markDirty: true, silent });
+  return { ok: true, at, by: u?.name || '', result: res };
+}
+/** 讀閘（含舊資料推導） */
+export const branchGate = branchId => {
+  const b = branchById(branchId);
+  return b ? gateOfLink(b.link) : 'open';
+};
+
 /** ★ 支部版面：各支部自家設計，之後照抄入嚟（旅側唔另設一套） */
 export const branchLayout = id => (id === 'troop' ? null : (branchById(id)?.layout || null));
 export const myIdentity = () => session?.identity || null;
@@ -245,7 +279,7 @@ export function counters() {
     usersPending: (d.users || []).filter(u => u.status === 'pending' && !u.hidden).length,
     sharesPending: pendingShares().length,
     sharesSentPending: sharesFromMe().filter(s => s.state === 'pending').length,
-    systemAlerts: (d.branches || []).filter(b => b.link.state !== 'green').length + (d.backend?.broken?.length || 0)
+    systemAlerts: (d.branches || []).filter(b => b.link.state !== 'green' || gateOfLink(b.link) === 'closed').length + (d.backend?.broken?.length || 0)
   };
 }
 

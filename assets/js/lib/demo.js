@@ -33,7 +33,7 @@ export const DEMO_BRANCHES = [
     id: 'vs0082', code: '0082', name: '深資童軍團', section: '深資童軍', color: '#7B2233',
     youth: 18, adults: 4, founded: '2012',
     leader: '張偉業', leaderEmail: 'cheung@demo.troop',
-    link: { state: 'green', purpose: 'vsbadge-troop-sig-v1', api: 'v1', localLogin: false, registeredAt: '2026-09-18', lastPing: '2026-09-25 07:40', testedAt: '2026-09-25 07:40', backend: 'script.google.com/macros/s/AKfyc…VS/exec', note: '進度 leaf 已接駁，本地入口已閂' },
+    link: { state: 'green', purpose: 'vsbadge-troop-sig-v1', api: 'v1', gate: 'sig-only', localLogin: false, gateBy: '陳大文', gateAt: '2026-09-18 16:20', registeredAt: '2026-09-18', lastPing: '2026-09-25 07:40', testedAt: '2026-09-25 07:40', backend: 'script.google.com/macros/s/AKfyc…VS/exec', note: '進度 leaf 已接駁，本地入口已閂' },
     progressSource: 'vsbadge', hasPortal: true, publicRank: 2,
     layout: { id: 'vs', name: '深資版（自家設計）', from: 'vs_portal', state: 'copy-pending', note: '支部已設計好；之後照抄入嚟（旅側唔另設）' }
   },
@@ -41,7 +41,7 @@ export const DEMO_BRANCHES = [
     id: 'sc0082', code: '0082', name: '童軍團', section: '童軍', color: '#1d4e89',
     youth: 42, adults: 6, founded: '1978',
     leader: '李美儀', leaderEmail: 'lee@demo.troop',
-    link: { state: 'yellow', purpose: 'scportal-troop-sig-v1', api: 'v1', localLogin: true, registeredAt: '2026-09-22', lastPing: '2026-09-24 21:10', testedAt: '2026-09-24 21:10', backend: 'script.google.com/macros/s/AKfy…SC/exec', note: '已登記，未閂本地入口（等下屬補 sig）' },
+    link: { state: 'yellow', purpose: 'scportal-troop-sig-v1', api: 'v1', gate: 'open', localLogin: true, registeredAt: '2026-09-22', lastPing: '2026-09-24 21:10', testedAt: '2026-09-24 21:10', backend: 'script.google.com/macros/s/AKfy…SC/exec', note: '已登記，未閂本地入口（等下屬補 sig）' },
     progressSource: 'scoutbadge', hasPortal: true, publicRank: 1,
     layout: { id: 'scout', name: '童軍版（自家設計）', from: 'scout_portal', state: 'copy-pending', note: '支部已設計好；之後照抄入嚟' }
   },
@@ -49,7 +49,7 @@ export const DEMO_BRANCHES = [
     id: 'cs0082', code: '0082', name: '幼童軍團', section: '幼童軍', color: '#b58b00',
     youth: 36, adults: 5, founded: '1985',
     leader: '黃志強', leaderEmail: 'wong@demo.troop',
-    link: { state: 'green', purpose: 'cubsbadge-troop-sig-v1', api: 'v1', localLogin: false, registeredAt: '2026-09-20', lastPing: '2026-09-25 06:05', testedAt: '2026-09-25 06:05', backend: 'script.google.com/macros/s/AKfy…CS/exec', note: '已接駁（cubsbadge 零回打版，待對齊）' },
+    link: { state: 'green', purpose: 'cubsbadge-troop-sig-v1', api: 'v1', gate: 'sig-only', localLogin: false, gateBy: '陳大文', gateAt: '2026-09-20 11:05', registeredAt: '2026-09-20', lastPing: '2026-09-25 06:05', testedAt: '2026-09-25 06:05', backend: 'script.google.com/macros/s/AKfy…CS/exec', note: '已接駁（cubsbadge 零回打版，待對齊）' },
     progressSource: 'cubsbadge', hasPortal: true, publicRank: 2,
     layout: { id: 'cubs', name: '幼童軍版（自家設計）', from: 'cubs_portal', state: 'copy-pending', note: '照抄；要保留旅側嘅身份／分享插槽' }
   },
@@ -57,7 +57,7 @@ export const DEMO_BRANCHES = [
     id: 'gs0082', code: '0082', name: '小童軍團', section: '小童軍', color: '#2e8a52',
     youth: 28, adults: 4, founded: '1996',
     leader: '陳小萍', leaderEmail: 'chan@demo.troop',
-    link: { state: 'red', purpose: '', api: '', localLogin: true, registeredAt: '', lastPing: '—', testedAt: '', backend: '', note: '未接駁（該團未起支部系統）' },
+    link: { state: 'red', purpose: '', api: '', gate: 'open', localLogin: true, registeredAt: '', lastPing: '—', testedAt: '', backend: '', note: '未接駁（該團未起支部系統）' },
     progressSource: '', hasPortal: false, publicRank: 1,
     layout: { id: 'generic', name: '通用版面（未設計）', from: '', state: 'generic', note: '未有自家版面 —— 用通用版面，之後換' }
   },
@@ -65,7 +65,7 @@ export const DEMO_BRANCHES = [
     id: 'rs0082', code: '0082', name: '樂行童軍團', section: '樂行童軍', color: '#a8531f',
     youth: 11, adults: 3, founded: '2019',
     leader: '何家俊', leaderEmail: 'ho@demo.troop',
-    link: { state: 'green', purpose: 'roverbadge-troop-sig-v1', api: 'v1', localLogin: false, registeredAt: '2026-09-19', lastPing: '2026-09-25 07:02', backend: 'script.google.com/macros/s/AKfy…RS/exec', note: '已接駁，本地入口已閂' },
+    link: { state: 'green', purpose: 'roverbadge-troop-sig-v1', api: 'v1', gate: 'closed', localLogin: false, gateBy: '陳大文', gateAt: '2026-09-23 22:10', gateNote: '團部裝修 + 兩個月無領袖；11/1 檢視後再開', registeredAt: '2026-09-19', lastPing: '2026-09-25 07:02', backend: 'script.google.com/macros/s/AKfy…RS/exec', note: '被關：團部裝修 + 兩個月無領袖；11/1 檢視後再開' },
     progressSource: 'roverbadge', hasPortal: true, publicRank: 2,
     layout: { id: 'rover', name: '樂行版（自家設計）', from: 'rover_portal', state: 'copy-pending', note: '照抄' }
   }

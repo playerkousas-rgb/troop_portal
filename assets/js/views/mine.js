@@ -3,8 +3,9 @@ import { esc, icon, toast, fmtDate, fmtDateFull, money, addDays, todayISO } from
 import * as S from '../lib/store.js';
 import { go } from '../lib/router.js';
 import { page, card, table, badge, notice, stat, kv, progressBar, fold, chips, modal } from './ui.js';
-import { identityMeta, titleMeta, ageGroupOf, ageFromDob, ROLE_ANCHOR, defaultRankFor, visName, can } from '../lib/registry.js';
+import { identityMeta, titleMeta, ageGroupOf, ageFromDob, ROLE_ANCHOR, defaultRankFor, visName, can, gateMeta } from '../lib/registry.js';
 import { branchEntryStatus, branchEntryUrl } from '../lib/auth.js';
+import { gateOfLink } from '../lib/registry.js';
 
 export function render(el) {
   const s = S.getSession();
@@ -129,6 +130,7 @@ export function render(el) {
     { k: '年齡', v: age === null ? '未填生日' : age + ' 歲' },
     { k: '通告', v: notices.length },
     { k: '待接收分享', v: S.pendingShares(s.branchId).length, tone: S.pendingShares(s.branchId).length ? 'warn' : 'ok' },
+    { k: '支部系統閘', v: gateMeta(S.branchGate(s.branchId)).label, tone: gateMeta(S.branchGate(s.branchId)).tone, hint: '由旅側控制（支部系統冇掣）' },
     { k: '支部版面', v: S.branchLayout(s.branchId)?.id === 'generic' ? '通用（待接入）' : '自家版（待照抄）', hint: '各支部自己設計，旅側唔另設' },
     { k: '活動', v: events.length },
     { k: '本團物資', v: loans.length }
@@ -205,6 +207,7 @@ export function render(el) {
         <dt>入口</dt><dd><span class="mono">${esc(branchEntryUrl(s.branchId, s.ymis))}</span></dd>
         <dt>狀態</dt><dd>${badge(st.state === 'green' ? '綠色：已接駁 ＋ 已閂本地登入' : st.state === 'yellow' ? '黃色：已登記、未閂口' : '紅色：未登記下游', st.state === 'green' ? 'g' : st.state === 'yellow' ? 'y' : 'r', true)}</dd>
         <dt>密碼由邊個驗</dt><dd>該團後端（示範模式：由旅閘嘅示範帳號模擬）</dd>
+        <dt>支部系統閘</dt><dd>${badge(gateMeta(gateOfLink(b?.link)).label, gateMeta(gateOfLink(b?.link)).tone, true)} <span class="xs faint">由旅側控制；「被關」＝一律唔入得（連旅入口）</span></dd>
         <dt>你而家喺邊</dt><dd>★ 你就係由<b>旅入口</b>入咗你支部（名冊正本仍然住該團 SHEET）：旅入口＝你支部嘅入口，唔使另開一個系統</dd>
       </div>
       <div class="mt-12">${notice('你喺旅睇到嘅嘢 ＝ <b>你支部嘅嘢</b> ＋ <b>其他支部 share 咗並經你哋接收</b>嘅嘢。要跨支部睇多啲 → 由該團批「跨團幫手」，唔會靜靜地放行。', 'info')}</div>`,
