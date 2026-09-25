@@ -176,6 +176,19 @@ t('proxy：申請批核／申請模式嘅權限（批核＝領袖、改政策＝
   assert(proxy.GAS_WHITELIST.includes('decideApplication') && proxy.GAS_WHITELIST.includes('getApplyMode'), '批核／查模式要入白名單');
   assert(!proxy.GAS_WHITELIST.includes('accountApply'), '自助申請唔應該經 proxy（免登入路徑自己經 GAS 匿名面）');
 });
+t('proxy：移交（BUILD §6）＝旅長／教練員做得、白名單有、唔可以匿名', async () => {
+  ['transferOut', 'importTransferBundle'].forEach(a => {
+    assert(proxy.GAS_WHITELIST.includes(a), `${a} 要入 proxy 白名單`);
+    assert(proxy.LEADER_ACTIONS.includes(a), `${a} 應該旅長／教練員都做得`);
+  });
+  assert(!proxy.ANON_GAS.includes('transferOut') && !proxy.ANON_GAS.includes('importTransferBundle'), '移交唔可以免登入做（有 SCOUT_ID 同家長資料）');
+  const gas = (await import('node:fs')).readFileSync(new URL('../apps-script/Code.gs', import.meta.url), 'utf8');
+  assert(/function transferOut/.test(gas) && /TRANSFERRED_OUT/.test(gas), 'GAS 移出要記 TRANSFERRED_OUT tombstone');
+  assert(/function bundleSha_/.test(gas) && /SHA_256/.test(gas), '套裝要真 sha256');
+  assert(/function importTransferBundle/.test(gas) && /bad_hash/.test(gas), '匯入要驗 sha256');
+  assert(/code: 'clash'|'clash'/.test(gas), '撞號要擋');
+});
+
 t('proxy：apikey 只喺 server 側（原始碼掃描）', async () => {
   const src = (await import('node:fs')).readFileSync(new URL('../api/proxy.js', import.meta.url), 'utf8');
   assert(/process\.env\[`TROOP_\$\{unit\}_APIKEY`\]/.test(src), 'apikey 應該只由 env 讀');

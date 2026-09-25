@@ -98,6 +98,15 @@ export async function saveTables(data) {
   const g = guard(); if (g) return g;
   return jfetch('/api/proxy', { action: 'saveTables', unit: unitId(), payload: { data } });
 }
+/* ------------------------- P4：移交與升降團（BUILD §6） ------------------------- */
+export async function transferOut(payload) {
+  const g = guard(); if (g) return g;
+  return jfetch('/api/proxy', { action: 'transferOut', unit: unitId(), payload });
+}
+export async function importTransferBundle(payload) {
+  const g = guard(); if (g) return g;
+  return jfetch('/api/proxy', { action: 'importTransferBundle', unit: unitId(), payload });
+}
 export async function gasAction(action, payload = {}) {
   const g = guard(); if (g) return g;
   return jfetch('/api/proxy', { action, unit: unitId(), payload });

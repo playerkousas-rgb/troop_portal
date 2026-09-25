@@ -253,12 +253,21 @@ export async function copyText(t) {
   }
 }
 export function downloadFile(name, text, mime = 'application/json') {
-  const blob = new Blob([text], { type: mime + ';charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = name;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-  toast('已下載 ' + name, 'ok');
+  /* 冇 Blob／createObjectURL（例如 jsdom、舊瀏覽器）＝唔可以扮下載咗：老實講 + log 全文 */
+  try {
+    if (typeof Blob === 'undefined' || !URL?.createObjectURL) throw new Error('呢個環境唔支援檔案下載');
+    const blob = new Blob([text], { type: mime + ';charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    toast('已下載 ' + name, 'ok');
+    return true;
+  } catch (e) {
+    toast(`下載唔到（${e.message}）—— 內容已放入主控台，可以自己複製`, 'warn', '', null, 5000);
+    try { console.log(`[${name}]\n${text}`); } catch { /* 唔緊要 */ }
+    return false;
+  }
 }
 export function toCSV(rows) {
   const cell = v => {

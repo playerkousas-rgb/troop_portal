@@ -665,6 +665,76 @@ t('開戶申請：帶家長同意欄位（唔打勾＝consent:false 照記，唔
   eq(rows.find(r => r.ymis === 'Y8').consent, false, '冇打勾要記 false（唔可以當同意）');
 });
 
+/* ⑰ 移交與升降團（BUILD §6）：移出 tombstone＋套裝 sha256；匯入冪等＋撞號；家長處理 */
+t('移交：移出＝TRANSFERRED_OUT tombstone ＋ transferTo／transferDate ＋ 套裝 sha256', () => {
+  const { G, props } = makeSandbox(); G.initializeSheets();
+  const key = props.get('API_KEY');
+  /* 先造一個在隊成員（移出就係將佢記 tombstone） */
+  const us = G.readUsers_(); us.push({ id: 'u-t1', ymis: 'YMIS-9', name: '陳大文', email: 'tai@demo.hk', role: 'member', status: 'ACTIVE', branchId: 'sc', pv: 1 });
+  G.writeTable_('旅員', us, 'test');
+  const r = call(G, { action: 'transferOut', apikey: key, scoutId: 'YMIS-9', name: '陳大文', from: 'sc', to: 'vs', reason: '升團', date: '2026-09-26' });
+  assert(r.success === true, '移出要成功：' + JSON.stringify(r).slice(0, 120));
+  eq(r.data.bundle.scout_id, 'YMIS-9');
+  eq(r.data.bundle.transferTo, 'vs');
+  assert(/^[0-9a-f]{64}$/.test(r.data.sha256), '要真 sha256（64 hex）：' + r.data.sha256);
+  const u = G.readUsers_().find(x => x.ymis === 'YMIS-9');
+  eq(String(u.status).toUpperCase(), 'TRANSFERRED_OUT', '旅員要記 TRANSFERRED_OUT（tombstone）');
+  eq(u.transferTo, 'vs');
+  assert(u.transferDate, '要記 transferDate');
+  /* 改過套裝就驗唔到 hash（防中途改檔） */
+  const tampered = { ...r.data.bundle, name: '（改）' };
+  const bad = call(G, { action: 'importTransferBundle', apikey: key, bundle: tampered, sha256: r.data.sha256 });
+  eq(bad.code, 'bad_hash', '改過就要拒（唔可以靜靜收）');
+  /* 正確套裝 → 建立新 ACTIVE（其實係 pending_hash：密碼行開戶流程） */
+  const ok1 = call(G, { action: 'importTransferBundle', apikey: key, bundle: r.data.bundle, sha256: r.data.sha256, to: 'vs' });
+  assert(ok1.success === true, '接收要成功：' + JSON.stringify(ok1).slice(0, 140));
+  eq(ok1.data.user.status, 'pending_hash', '密碼行開戶流程（未設 hash）');
+  assert(G.readTable_('移交').some(x => x.transferId === r.data.transferId && x.state === 'done'), '移交表要記 done');
+});
+
+t('移交：transferId 冪等（重複匯入唔會建第二次）＋撞號阻住', () => {
+  const { G, props } = makeSandbox(); G.initializeSheets();
+  const key = props.get('API_KEY');
+  const r = call(G, { action: 'transferOut', apikey: key, scoutId: 'YMIS-7', name: '李小明', from: 'sc', to: 'vs' });
+  const b = r.data.bundle, sha = r.data.sha256;
+  call(G, { action: 'importTransferBundle', apikey: key, bundle: b, sha256: sha, to: 'vs' });
+  const n1 = G.readUsers_().filter(x => x.ymis === 'YMIS-7').length;
+  const again = call(G, { action: 'importTransferBundle', apikey: key, bundle: b, sha256: sha, to: 'vs' });
+  eq(again.data.duplicate, true, '第二次要回 duplicate');
+  eq(G.readUsers_().filter(x => x.ymis === 'YMIS-7').length, n1, '重複匯入唔可以多開一個戶');
+  eq(G.readTable_('移交').filter(x => x.transferId === b.transferId).length, 1, '一個 transferId 只可以有一行（接收＝更新，唔係另開一行）');
+  /* 撞號：同一個 SCOUT_ID 已經有戶（現役或等開戶）→ 阻住 */
+  const r2 = call(G, { action: 'transferOut', apikey: key, scoutId: 'YMIS-8', name: '王小明', from: 'sc', to: 'vs' });
+  const us2 = G.readUsers_(); us2.push({ id: 'u-t8', ymis: 'YMIS-8', name: '王小明', role: 'member', status: 'ACTIVE', branchId: 'vs', pv: 1 });
+  G.writeTable_('旅員', us2, 'test');
+  const clash = call(G, { action: 'importTransferBundle', apikey: key, bundle: r2.data.bundle, sha256: r2.data.sha256, to: 'vs' });
+  eq(clash.code, 'clash', '撞號要擋（唔會重複建）');
+  /* 冇 transferId 或冇 scout_id 嘅檔一律唔收 */
+  eq(call(G, { action: 'importTransferBundle', apikey: key, bundle: { scout_id: 'YMIS-6' } }).code, 'bad_transfer', '冇 transferId 唔收');
+});
+
+t('移交：家長處理（同旅＝零改動；轉旅＝來源家長戶停用＋通知文案）', () => {
+  const { G, props } = makeSandbox(); G.initializeSheets();
+  const key = props.get('API_KEY');
+  /* 造一個家長戶，children 用 global SCOUT_ID */
+  const users = G.readUsers_();
+  users.push({ id: 'u-p1', email: 'mom@demo.hk', role: 'parent', status: 'ACTIVE', children: ['YMIS-5'], name: '陳太', ymis: '', pv: 1 });
+  G.writeTable_('旅員', users, 'test');
+  /* 同旅移動：咩都唔郁 */
+  const same = call(G, { action: 'transferOut', apikey: key, scoutId: 'YMIS-5', name: '陳小明', from: 'sc', to: 'sc', parentSameTroop: true });
+  assert(same.success === true, '同旅移動要成功');
+  eq(G.readUsers_().find(u => u.id === 'u-p1').status, 'ACTIVE', '同旅移動＝家長零改動');
+  assert(!same.data.parentNotice, '同旅移動唔需要通知文案');
+  /* 轉旅：家長戶轉 LEFT ＋回通知文案（接收旅發邀請連結重開） */
+  const out = call(G, { action: 'transferOut', apikey: key, scoutId: 'YMIS-5', name: '陳小明', from: 'sc', to: '第八十三旅', parentEmail: 'mom@demo.hk' });
+  assert(out.success === true, '轉旅要成功：' + JSON.stringify(out).slice(0, 120));
+  const p = G.readUsers_().find(u => u.id === 'u-p1');
+  eq(String(p.status).toUpperCase(), 'LEFT', '來源家長戶要轉 LEFT');
+  assert(p.children.includes('YMIS-5'), 'children 要留住（全球 SCOUT_ID，接收旅解析得到）');
+  assert(/邀請連結/.test(out.data.parentAction) && /邀請連結/.test(out.data.parentNotice), '要講清楚接收旅發邀請連結重開：' + out.data.parentNotice.slice(0, 80));
+  assert(/transferDate|已經移交/.test(out.data.parentNotice), '通知文案要有移交日期');
+});
+
 /* 收尾 */
 console.log('');
 if (fails.length) {

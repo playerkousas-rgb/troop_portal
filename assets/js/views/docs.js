@@ -15,7 +15,8 @@ export const DOC_FILES = [
   { who: '全部', file: 'docs/教材/06-模組說明.md', label: '模組說明（跟模組註冊）' },
   { who: '全部', file: 'docs/教材/07-示範旅引導任務.md', label: '示範旅（MOCK）引導任務' },
   { who: '旅長', file: 'docs/教材/08-開旅-checklist.md', label: '開旅 checklist（A–F）' },
-  { who: '旅長', file: 'docs/教材/09-開戶與批核.md', label: '開戶與批核' }
+  { who: '旅長', file: 'docs/教材/09-開戶與批核.md', label: '開戶與批核' },
+  { who: '全部', file: 'docs/教材/10-移交與升降團.md', label: '移交與升降團（來源／目標團）' }
 ];
 
 export function render(el, params = {}, query = {}) {

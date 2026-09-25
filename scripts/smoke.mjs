@@ -1572,6 +1572,61 @@ await test('★ 同步 UI：系統 →「同步」分頁（燈號卡＋即刻同
   document.querySelectorAll('.mask').forEach(m => m.remove());
 });
 
+await test('★ 移交（BUILD §6）：同一套規矩（hash／冪等／撞號／家長）＋UI 兩邊都有', async () => {
+  const T = await import('../assets/js/lib/transfer.js');
+  const H = await import('../assets/js/lib/hash.js');
+  /* canonical 欄序一定要同 GAS 一樣（唔係兩邊算唔同 hash） */
+  const gas = readFileSync(join(ROOT, 'apps-script/Code.gs'), 'utf8');
+  const gasFields = (gas.match(/var TRANSFER_FIELDS = \[([^\]]+)\]/) || [, ''])[1].split(',').map(x => x.trim().replace(/^'|'$/g, '')).filter(Boolean);
+  eq(gasFields.join(','), H.TRANSFER_FIELDS.join(','), 'GAS 同前端嘅欄序要一模一樣');
+  const bundle = { transferId: 'tid-1', scout_id: 'YMIS-1', ymis: 'YMIS-1', name: '陳小明', dob: '2010-01-01', parentContact: 'mom@demo.hk', badgeSummary: '深資章', transferTo: 'vs', transferDate: '2026-09-26' };
+  const h = await H.hashForBundle(bundle);
+  eq(h.hash.length, 64, '要 64 位 hex');
+  const h2 = await H.hashForBundle({ ...bundle, sha256: 'zzz', hashKind: 'sha256' });
+  eq(h2.hash, h.hash, 'canonical：多餘欄位／key 次序唔影響 hash');
+  const h3 = await H.hashForBundle({ ...bundle, name: '陳小明（改）' });
+  assert(h3.hash !== h.hash, '改過內容就要唔同 hash');
+
+  /* 接收規矩：① hash 唔對 ② 冇 transferId ③ 冪等 ④ 撞號 */
+  const members = [{ ymis: 'YMIS-2', name: '李小明', status: 'ACTIVE' }];
+  const transfers = [{ transferId: 'tid-done', state: 'done' }];
+  eq((await T.verifyBundle(bundle, { sha256: 'deadbeef', members: [], transfers: [] })).code, 'bad_hash', '改過檔要拒');
+  eq(T.verifyImport({ bundle: { scout_id: 'Y' }, hash: h.hash }).code, 'bad_transfer', '冇 transferId 唔收');
+  eq(T.verifyImport({ bundle: { transferId: 'tid-x' }, hash: h.hash }).code, 'bad_scout', '冇 SCOUT_ID 唔收');
+  eq(T.verifyImport({ bundle, hash: h.hash, transfers }).code, 'ok', '乾淨套裝要收得');
+  eq(T.verifyImport({ bundle: { ...bundle, transferId: 'tid-done' }, hash: h.hash, transfers }).code, 'duplicate', '同一個 transferId 收過＝拒');
+  eq(T.verifyImport({ bundle: { ...bundle, scout_id: 'YMIS-2' }, hash: h.hash, members }).code, 'clash', '撞號要擋（現役）');
+  eq(T.verifyImport({ bundle: { ...bundle, scout_id: 'YMIS-2' }, hash: h.hash, members: [{ ymis: 'YMIS-2', name: 'x', status: 'pending_hash' }] }).code, 'clash', '等開戶都算撞號');
+  /* 接收之後＝pending_hash（密碼行開戶流程，唔會當已開戶） */
+  eq(T.acceptRow(bundle, 'vs', '2026-09-26').status, 'pending_hash');
+  eq(T.acceptRow(bundle, 'vs', '2026-09-26').transferId, 'tid-1');
+  /* 移出＝tombstone ＋ transferTo／transferDate；家長：同旅零改動 */
+  const patch = T.outPatch({ ...bundle, sha256: h.hash }, { from: 'sc', to: 'vs', reason: '升團', date: '2026-09-26' });
+  eq(patch.member.status, 'TRANSFERRED_OUT', '移出要記 tombstone');
+  eq(patch.member.transferTo, 'vs');
+  assert(/家長戶轉 LEFT/.test(patch.row.parentAction), '轉旅＝來源家長戶停用');
+  const same = T.outPatch(bundle, { to: 'sc', sameTroop: true });
+  assert(/零改動/.test(same.row.parentAction), '同旅移動＝家長零改動');
+  /* GAS 側：三個動作齊 ＋ 家長通知文案 ＋ 白名單 */
+  assert(/function transferOut/.test(gas) && /TRANSFERRED_OUT/.test(gas), 'GAS 要有 transferOut');
+  assert(/function importTransferBundle/.test(gas) && /parentNotice/.test(gas), 'GAS 要有接收同家長通知文案');
+  assert(/case 'transferOut'/.test(gas) && /'transferOut', 'importTransferBundle'/.test(gas), '要入 ACTIONS 白名單');
+  /* UI：移出／接收兩邊都喺「移交與升降團」度；真模式叫 API、示範用同一套規則 */
+  const view = readFileSync(join(ROOT, 'assets/js/views/transfers.js'), 'utf8');
+  assert(/'out', '移出（來源團）'/.test(view) && /'pending', '接收（目標團）'/.test(view), '要分開來源團／目標團兩個分頁');
+  assert(/API\.transferOut/.test(view) && /API\.importTransferBundle/.test(view), '真模式要叫真 API（唔係假 UI）');
+  assert(/verifyBundle/.test(view), '示範模式都要行同一套驗證規則');
+  A.loginAs('u-chief');
+  main.boot();
+  fireHash(w, '#/transfers?tab=out');
+  const t = text();
+  assert(t.includes('移出（來源團）') || t.includes('① 移出'), '要有移出介面：' + t.slice(0, 60));
+  assert(document.querySelector('#to-go'), '要有「移出 ＋ 產生移交套裝」掣');
+  assert(t.includes('TRANSFERRED_OUT'), '要講明 tombstone');
+  fireHash(w, '#/transfers?tab=pending');
+  assert(document.querySelector('#tf-import'), '接收頁要有「匯入移交套裝」掣');
+});
+
 /* ---------- 互動掃描：撳晒所有掣，唔可以有例外 ---------- */
 const asyncErrors = [];
 process.on('unhandledRejection', e => asyncErrors.push(String(e && e.message ? e.message : e)));

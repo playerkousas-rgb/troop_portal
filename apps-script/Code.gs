@@ -90,7 +90,9 @@ var ACTIONS = ['status', 'dbInfo', 'load', 'loadTables', 'saveTables', 'saveTabl
   'saveAudit', 'logAccess', 'getAuditLog', 'getAccessLog', 'purgeOldLogs', 'backupToDrive', 'setupWithToken',
   'registry', 'setUnitStatus', 'saveShare', 'saveRescue', 'deleteRow', 'getTombstones', 'saveDbPart', 'purgeTombstones',
   'noticeSignup', 'borrowApply', 'financeApply', 'progressApply', 'accountApply', 'decideApplication', 'setApplyMode', 'getApplyMode',
-  'backupState', 'purgeLeftMembers', 'dataInventory'];
+  'backupState', 'purgeLeftMembers', 'dataInventory',
+  /* P4：移交與升降團（BUILD §6） */
+  'transferOut', 'importTransferBundle'];
 
 /** 需要 apikey（＝server 側）嘅敏感 action */
 var SERVER_ONLY = ['authUser', 'dbInfo', 'exportAll', 'importAll', 'backupToDrive', 'purgeOldLogs'];
@@ -1287,6 +1289,8 @@ function dispatch_(action, body, params) {
     case 'financeApply': return financeApply(body);
     case 'progressApply': return progressApply(body);
     case 'accountApply': return accountApply(body);
+    case 'transferOut': return transferOut(body);
+    case 'importTransferBundle': return importTransferBundle(body);
     case 'decideApplication': return decideApplication(body);
     case 'setApplyMode': return wrap_(setApplyMode(body), 'mode_fail');
     case 'getApplyMode': return ok_({ mode: readApplyMode_() });
@@ -1461,6 +1465,148 @@ function readApplyMode_() {
   return r && r.value === 'invite-only' ? 'invite-only' : 'open';
 }
 /** 求救／問題回報**落旅 SHEET**（免登入都寫得：只可以 append，唔可以覆蓋其他人嘅單） */
+/* ============================ 移交與升降團（BUILD §6） ============================
+   同一套流程行晒：跨支部／轉旅／調區／海轉空。
+     ① 移出（transferOut）：來源團記 TRANSFERRED_OUT（tombstone）＋ transferTo／transferDate，
+        歷史留來源唯讀；出一個移交套裝 JSON ＋ sha256（面交／私密頻道傳）
+     ② 接收（importTransferBundle）：驗 sha256 → transferId 冪等 → 撞號阻擋 →
+        新 ACTIVE membership（**同一個 SCOUT_ID**）→ 密碼行開戶流程（未設 hash ＝ pending_hash）
+     ③ 家長：同旅移動＝零改動（children 存全域 SCOUT_ID）；轉旅／調區＝來源家長戶轉 left
+        ＋回一段通知文案（由接收旅發邀請連結重開）
+   ========================================================================== */
+var TRANSFER_FIELDS = ['transferId', 'scout_id', 'ymis', 'name', 'dob', 'parentContact', 'badgeSummary', 'transferTo', 'transferDate'];
+/** 移交套裝嘅 sha256：**只計內容欄位**（唔計 sha256 自己），key 次序固定先驗得到 */
+function bundleCanonical_(b) {
+  var src = b || {};
+  var out = {};
+  TRANSFER_FIELDS.forEach(function (k) { out[k] = src[k] === undefined || src[k] === null ? '' : src[k]; });
+  return JSON.stringify(out);
+}
+function bundleSha_(b) { return sha256Hex_(bundleCanonical_(b)); }
+
+function transferOut(o) {
+  var scoutId = sanitizeLabel_(o.scoutId || o.ymis || '');
+  if (!scoutId) return err_('bad_scout', '要 SCOUT_ID／YMIS');
+  var to = String(o.to || '').slice(0, 40);
+  var from = sanitizeLabel_(o.from || '');
+  var users = readUsers_();
+  var u = users.filter(function (x) { return String(x.ymis || '') === scoutId; })[0];
+  if (u) {
+    if (String(u.status || '').toLowerCase() === 'transferred_out') {
+      return err_('already_out', '呢位成員已經移出咗（唔會出兩次套裝）');
+    }
+    u.status = 'TRANSFERRED_OUT';
+    u.transferTo = to;
+    u.transferDate = String(o.date || stamp_().slice(0, 10));
+    var w0 = writeTable_('旅員', users, actor_());
+    if (!w0.ok) return err_('write_fail', w0.msg);
+  }
+  var bundle = {
+    transferId: uid_('tid'),
+    scout_id: scoutId, ymis: scoutId,
+    name: String(o.name || (u && u.name) || '').slice(0, 80),
+    dob: String(o.dob || (u && u.dob) || '').slice(0, 20),
+    parentContact: String(o.parentContact || (u && u.email) || '').slice(0, 120),
+    badgeSummary: String(o.badgeSummary || '').slice(0, 300),
+    transferTo: to, transferDate: String(o.date || stamp_().slice(0, 10))
+  };
+  var sha = bundleSha_(bundle);
+  var rec = {
+    id: bundle.transferId, kind: sanitizeLabel_(o.kind || 'transfer'),
+    scoutId: scoutId, name: bundle.name, from: from, to: to,
+    reason: String(o.reason || '').slice(0, 80), at: stamp_(),
+    state: 'out', bundle: 'sha256:' + sha, sha256: sha,
+    transferId: bundle.transferId, parentSameTroop: !!o.parentSameTroop,
+    parentAction: parentAction
+  };
+  /* 家長處理（BUILD §6）：同旅移動＝零改動；轉旅／調區＝來源家長戶轉 left（children 留住），
+     接收旅之後用套裝內 email 發邀請連結重開。唔會自動開新戶。 */
+  var parentAction = '（同旅移動：家長零改動 —— children 存全域 SCOUT_ID）';
+  var parentNotice = '';
+  if (!o.parentSameTroop) {
+    var pEmail = String(o.parentEmail || (u && u.guardianEmail) || '').toLowerCase();
+    var users2 = readUsers_();
+    var hit = users2.filter(function (x) {
+      if (String(x.role || '') !== 'parent') return false;
+      if (pEmail && String(x.email || '').toLowerCase() === pEmail) return true;
+      var kids = x.children || x.childrenIds || [];
+      return kids.map(String).indexOf(scoutId) >= 0;
+    });
+    if (hit.length) {
+      hit.forEach(function (x) { x.status = 'LEFT'; x.leftAt = stamp_().slice(0, 10); x.leftReason = '被監護人轉旅／調區'; });
+      var w3 = writeTable_('旅員', users2, actor_());
+      if (!w3.ok) return err_('write_fail', w3.msg);
+      parentAction = '來源家長戶已轉 LEFT（' + hit.length + ' 個）—— 接收旅發邀請連結重開';
+      audit_(actor_(), '家長戶停用（轉旅）', pEmail || scoutId, hit.length + ' 個', 'leader');
+    } else {
+      parentAction = '搵唔到來源家長戶（可能要人手核對）—— 接收旅按套裝內 email 發邀請連結重開';
+    }
+    parentNotice = '【' + unitId_() + '】' + (bundle.name || scoutId) + ' 已經移交去 ' + (to || '（接收單位）')
+      + '（' + bundle.transferDate + '）。你喺本旅嘅家長帳號已停用；接收旅會用你嘅 email（'
+      + (pEmail || '套裝內嘅家長聯絡') + '）發一條一次性邀請連結，撳入去就可以重開，子女資料自動跟過去（children 用全球 SCOUT_ID，唔使重新綁定）。';
+  }
+  var rows = readTable_('移交');
+  if (rows.filter(function (r) { return String(r.transferId) === bundle.transferId; }).length) return err_('duplicate', 'transferId 撞（重試就會係咁）');
+  rows.push(rec);
+  var w = writeTable_('移交', rows, actor_());
+  if (!w.ok) return err_('write_fail', w.msg);
+  audit_(actor_(), '移出（TRANSFERRED_OUT）', scoutId, from + ' → ' + to + '｜sha256 ' + sha.slice(0, 12), 'leader');
+  return ok_({ saved: true, transferId: bundle.transferId, sha256: sha, bundle: bundle, row: rec, parentAction: parentAction, parentNotice: parentNotice });
+}
+
+function importTransferBundle(o) {
+  var b = o.bundle || {};
+  var sha = bundleSha_(b);
+  if (o.sha256 && String(o.sha256) !== sha) return err_('bad_hash', 'sha256 唔對 —— 個檔改過或者傳壞咗，唔可以匯入');
+  var scoutId = sanitizeLabel_(b.scout_id || b.ymis || '');
+  if (!scoutId) return err_('bad_scout', '套裝冇 SCOUT_ID');
+  var tid = sanitizeLabel_(b.transferId || '');
+  if (!tid) return err_('bad_transfer', '套裝冇 transferId（冇冪等鍵唔收）');
+  var rows = readTable_('移交');
+  /* 冪等：一個 transferId 只會有一行。移出時已經開咗一行（state 'out'）→ 接收就更新嗰行做 done，
+     唔會再 push 多一行（唔係嘅話同一個 transferId 會有兩行，讀返會亂） */
+  var idx = -1;
+  rows.forEach(function (r, i) { if (String(r.transferId) === tid && idx < 0) idx = i; });
+  if (idx >= 0 && String(rows[idx].state) === 'done') {
+    return ok_({ duplicate: true, transferId: tid, note: '呢個 transferId 已經接收過（冪等：唔會建第二次）' });
+  }
+  /* 撞號：本旅已經有同一個 SCOUT_ID（現役或等開戶）→ 阻住，交人手處理 */
+  var users = readUsers_();
+  var LIVE = ['ACTIVE', 'PENDING_HASH'];
+  var clash = users.filter(function (x) {
+    return String(x.ymis || '') === scoutId && LIVE.indexOf(String(x.status || '').toUpperCase()) >= 0;
+  })[0];
+  if (clash) {
+    audit_(actor_(), '接收移交被拒（撞號）', scoutId, '已有現役戶：' + String(clash.email || '').slice(0, 40), 'leader');
+    return err_('clash', '撞號：本旅已經有同一個 SCOUT_ID 現役（' + String(clash.name || '') + '）—— 唔會重複建，請人手核對');
+  }
+  var to = sanitizeLabel_(o.to || b.transferTo || '');
+  var at = stamp_();
+  var user = {
+    id: uid_('u'), ymis: scoutId, name: String(b.name || '').slice(0, 80),
+    email: String(o.email || b.parentContact || '').slice(0, 120),
+    role: 'member', branchId: to, identity: '成員', status: 'pending_hash',
+    dob: String(b.dob || '').slice(0, 20), mustChangePw: true,
+    fromBranch: sanitizeLabel_(o.from || ''), transferId: tid, joined: at.slice(0, 10),
+    pv: 1
+  };
+  users.push(user);
+  var w = writeTable_('旅員', users, actor_());
+  if (!w.ok) return err_('write_fail', w.msg);
+  var accept = {
+    state: 'done', at: at, reason: '接收匯入', bundle: 'sha256:' + sha, sha256: sha,
+    transferId: tid, acceptedBy: actor_(), acceptedAt: at,
+    note: '已接收：新 membership（pending_hash，首登強制改密碼）',
+    parentAction: b.parentContact ? '接收旅用套裝內 email 發邀請連結重開家長戶' : '套裝冇家長聯絡，家長要自己行開戶申請'
+  };
+  if (idx >= 0) rows[idx] = Object.assign({}, rows[idx], accept);
+  else rows.push(Object.assign({ id: tid, kind: 'transfer_in', scoutId: scoutId, name: user.name, from: sanitizeLabel_(o.from || ''), to: to }, accept));
+  var w2 = writeTable_('移交', rows, actor_());
+  if (!w2.ok) return err_('write_fail', w2.msg);
+  audit_(actor_(), '接收移交（匯入套裝）', scoutId, tid + '｜sha256 ' + sha.slice(0, 12) + ' → ' + to, 'leader');
+  return ok_({ saved: true, duplicate: false, transferId: tid, sha256: sha, user: { ymis: scoutId, branchId: to, status: 'pending_hash' } });
+}
+
 function saveRescue(o) {
   var r0 = o.rescue || {};
   var rec = {
