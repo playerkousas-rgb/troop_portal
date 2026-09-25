@@ -188,12 +188,10 @@ export function resolveRescue(id, { action = 'reply', reply = '', account = '', 
     done.gate = 'open';
   }
   if (action === 'reset-pw') {
-    const acc = String(account).trim().toLowerCase();
-    const t = load().users.find(x => String(x.email || '').toLowerCase() === acc || String(x.ymis || '') === String(account).trim());
-    if (!t) return { ok: false, msg: `搵唔到帳號「${account}」—— 要 email 或 YMIS（成員戶要該團團長執行）` };
-    commit(d => { const x = d.users.find(y => y.id === t.id); x.mustChangePw = true; x.pwResetAt = at; x.pwResetBy = u?.name || ''; }, { markDirty: true });
-    done.account = t.email || t.ymis;
-    done.tempPwNote = t.role === 'member' ? '臨時密碼已發（首登強制改）；成員戶真模式要該團團長執行' : '臨時密碼已發（首登強制改）';
+    const pw = resetPasswordFor(account, { by: u });
+    if (!pw.ok) return pw;                                 // 誠實失敗：唔會當成功
+    done.account = pw.account;
+    done.tempPwNote = pw.note;
   }
   commit(d => {
     const r = (d.rescues || []).find(x => x.id === id);
@@ -203,6 +201,24 @@ export function resolveRescue(id, { action = 'reply', reply = '', account = '', 
   }, { markDirty: true });
   return { ok: true, at, by: done.by, action, tempPw: action === 'reset-pw' ? DEMO_TEMP_PW : '' };
 }
+/** ★ 重設密碼（求救處理同超管救援共用）：發臨時密碼，首登強制改 */
+export function resetPasswordFor(account, { by = null } = {}) {
+  const u = by || currentUser();
+  const at = nowStr();
+  const acc = String(account || '').trim().toLowerCase();
+  if (!acc) return { ok: false, msg: '要填帳號（email 或 YMIS）' };
+  const t = load().users.find(x => String(x.email || '').toLowerCase() === acc || String(x.ymis || '') === String(account).trim());
+  if (!t) return { ok: false, msg: `搵唔到帳號「${account}」—— 要 email 或 YMIS（成員戶要該團團長執行）` };
+  commit(d => {
+    const x = d.users.find(y => y.id === t.id);
+    x.mustChangePw = true; x.pwResetAt = at; x.pwResetBy = u?.name || '';
+  }, { markDirty: true });
+  return {
+    ok: true, at, account: t.email || t.ymis, userId: t.id,
+    note: t.role === 'member' ? '臨時密碼已發（首登強制改）；成員戶真模式要該團團長執行' : '臨時密碼已發（首登強制改）'
+  };
+}
+
 /** 示範用臨時密碼（真模式：隨機產生 ＋ 一次性連結，唔會顯示喺畫面） */
 export const DEMO_TEMP_PW = 'demo1234';
 /** ★ 支部版面：各支部自家設計，之後照抄入嚟（旅側唔另設一套） */

@@ -149,7 +149,9 @@ await test('超管：隱藏帳號唔喺名單、唔計數，但入得 platform',
   assert(document.getElementById('view').innerHTML.includes('接入收件匣'), '超管入唔到平台頁');
   const nav = document.getElementById('nav').textContent;
   assert(nav.includes('平台'), '超管導航冇「平台」');
-  assert(!nav.includes('財務整合'), '超管竟然見到旅層模組');
+  /* ★ 用戶定案：超管唔經支部 SHEET 登記 → 全部模組都入得（2026-09-25） */
+  assert(nav.includes('財務整合') && nav.includes('支部'), '超管應該入得晒全部模組（第二層備援）');
+  assert(document.getElementById('super-banner')?.textContent.includes('唔經支部 SHEET 登記'), '超管冇『超管視角』橫額');
   fireHash(w, '#/dashboard');                 // 超管撳「儀表板」→ 應該彈返平台，唔應該係「未授權」
   assert(document.getElementById('view').innerHTML.includes('接入收件匣'), '超管儀表板冇彈返平台');
 });
@@ -176,7 +178,7 @@ const ROLE_ROUTES = {
   member: ['dashboard', 'mine', 'branches', 'notices', 'notice/n-1', 'calendar', 'inventory', 'shares', 'public', 'docs', 'docs/blueprint'],
   branchLeader: ['dashboard', 'mine', 'branches', 'branch/cs0082', 'notices', 'calendar', 'inventory', 'shares', 'public', 'docs', 'docs/blueprint'],
   scout: ['dashboard', 'mine', 'notices', 'calendar', 'inventory', 'shares', 'public', 'docs', 'docs/blueprint'],
-  super: ['dashboard', 'platform', 'docs'],
+  super: ['dashboard', 'platform', 'docs', 'branches', 'branch/vs0082', 'branch/gs0082', 'pending', 'users', 'finance', 'public'],
   guest: ['docs']
 };
 const LOGIN_FOR = {
@@ -414,6 +416,63 @@ await test('★ 支部系統登入通道：UI 只有旅長見掣、教練員冇'
   const v2 = document.getElementById('view');
   assert(!v2.querySelector('[data-gate]'), '教練員唔應該有掣');
   assert(v2.textContent.includes('唔可以改'), '冇講明冇權');
+});
+
+await test('★ 超管：唔經支部 SHEET 登記 → 任何支部／模組都入得（第二層備援）', async () => {
+  const raw = S.load();
+  const vs = raw.branches.find(x => x.id === 'vs0082');
+  const gs = raw.branches.find(x => x.id === 'gs0082');
+  assert(vs.link.gate === 'sig-only', '示範前提：深資團閂咗支部系統登入');
+  assert(gs.link.state === 'red', '示範前提：小童軍團未登記（紅燈）');
+
+  A.loginAs('u-super');
+  const sess = S.getSession();
+  assert(sess.role === 'super' && S.load().users.find(u => u.id === 'u-super').hidden === true, '超管帳號狀態唔啱');
+  /* 1) 唔靠登記：閂咗／未登記都睇得到、入得到 */
+  assert(S.canSeeBranch(vs) && S.canSeeBranch(gs), '超管竟然睇唔到閂咗／未登記嘅支部');
+  assert(R.can('super', 'enter_any_branch') && R.can('super', 'branch_link_edit') || R.can('super', 'platform_all'), '超管權限定義唔啱');
+  /* 2) 全部模組都開（唔係得平台） */
+  const mods = R.modulesForSession(sess).map(m => m.id);
+  assert(mods.includes('platform') && mods.includes('branches') && mods.includes('pending') && mods.includes('users'), '超管應該入得晒全部模組');
+  assert(mods.length === R.moduleList().length, '超管應該見到全部模組');
+  /* 3) 真係 render 到：閂咗嘅團、未登記嘅團、待辦、求救 */
+  main.boot();
+  for (const r of ['#/branch/vs0082?tab=link', '#/branch/gs0082', '#/branches', '#/pending?kind=rescue']) {
+    fireHash(w, r);
+    const t = (document.getElementById('view')?.textContent || '');
+    assert(!t.includes('未授權'), `${r} 竟然擋超管`);
+    assert(t.trim().length > 80, `${r} 超管見唔到內容`);
+  }
+  fireHash(w, '#/branch/vs0082?tab=link');
+  const v = document.getElementById('view');
+  const sb = document.getElementById('super-banner');
+  assert(sb && sb.textContent.includes('超管視角'), '超管睇旅務頁應該有『超管視角』橫額');
+  assert(sb.textContent.includes('唔經支部 SHEET 登記') && sb.textContent.includes('第二層備援'), '橫額冇講明唔經登記／接駁');
+  assert(v.textContent.includes('任何支部') || v.textContent.includes('接駁與登記'), '超管入唔到支部頁');
+  assert(v.textContent.includes('🆘 求救'), '超管睇唔到求救區');
+  assert(v.textContent.includes('支部系統登入通道'), '超管睇唔到接駁卡（ADMIN 死咗要佢開返閘）');
+  /* 4) 平台頁：超管救援卡（重設 ADMIN 密碼）＋ 求救單數 */
+  fireHash(w, '#/platform?tab=keys');
+  const vp = document.getElementById('view');
+  assert(vp.textContent.includes('超管救援'), '平台冇「超管救援」卡');
+  assert(vp.querySelector('#pf-reset-admin'), '冇「重設旅長（ADMIN）密碼」掣');
+  assert(vp.textContent.includes('求救'), '平台冇提求救單');
+  /* 5) 真係救得返：重設旅長密碼（首登強制改）＋ 開返閘 */
+  const pw = S.resetPasswordFor('chief@demo.troop');
+  assert(pw.ok && S.load().users.find(u => u.email === 'chief@demo.troop').mustChangePw === true, '超管重設旅長密碼失敗');
+  const g = S.setBranchGate('vs0082', 'open');
+  assert(g.ok && S.branchGate('vs0082') === 'open', '超管開返閘失敗');
+  /* 還原示範狀態 */
+  S.commit(d => {
+    const b = d.branches.find(x => x.id === 'vs0082');
+    b.link.gate = 'sig-only'; b.link.localLogin = false; b.link.state = 'green';
+    b.link.gateBy = '陳大文'; b.link.gateAt = '2026-09-18 16:20';
+    d.downstream.vs0082.localLogin = false;
+    const u = d.users.find(x => x.email === 'chief@demo.troop');
+    u.mustChangePw = false; delete u.pwResetAt; delete u.pwResetBy;
+  }, { markDirty: true });
+  assert(S.branchGate('vs0082') === 'sig-only', '還原示範狀態失敗');
+  A.loginAs('u-chief');
 });
 
 await test('★ 求救制：入唔到撳求救（免登入）→ ADMIN 喺旅側處理（唔會自動開任何嘢）', async () => {

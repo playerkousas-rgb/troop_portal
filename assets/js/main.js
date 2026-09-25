@@ -552,6 +552,7 @@ function renderShell() {
       <button class="btn xs" id="bn-docs">功能藍圖</button>
       <button class="btn xs" id="bn-logout">登出</button>
     </div>
+    ${role === 'super' ? `<div class="banner super no-print" id="super-banner"><span class="tag r sm">超管（隱藏）</span><span class="grow">${RESCUE.superView}</span></div>` : ''}
     <div class="shell">
       <aside class="side collapsed" id="side">
         <nav class="nav" id="nav"></nav>

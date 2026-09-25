@@ -83,8 +83,30 @@ export function render(el, params, query = {}) {
       <li>入口隱藏：<span class="mono">index.html?step=super</span>，或者旅閘撳 ⚜ 五下</li>
       <li>真模式：超管登入一樣要 PBKDF2 核對 ＋ 記入 ACCESS_LOG；SUPER_KEY 只喺 Vercel env</li>
       <li>日常唔用超管戶：超管只做「開旅、接入、輪換」，旅務一律用旅長戶</li>
-      <li><b>超管登入唔靠下游登記</b>：某團未登記／紅燈／閂咗支部系統登入／接駁斷 —— 都唔影響你入唔入得平台</li>
+      <li><b>超管登入唔靠下游登記</b>：某團未登記／紅燈／閂咗支部系統登入／接駁斷 —— 都唔影響你入唔入得（平台同任何支部頁都入得）</li>
+      <li>你入得任何支部頁（方便救火）—— 但每頁有紅色橫額提醒：<b>日常唔好改嘢</b>，你嘅改動照入審計</li>
     </ul>` })}
+    ${(() => {
+      const n = S.rescuesPending();
+      const list = S.openRescues();
+      return card({
+        title: '★ 超管救援（第二層）—— 你唔經支部 SHEET 登記，所以擋你唔住', sub: 'ADMIN 死咗／入唔到嗰陣，由你救',
+        body: `
+        ${notice('求救單正常由旅部 ADMIN 處理；呢張卡係<b>ADMIN 自己都入唔到</b>嗰陣用：<br>① 喺度<b>重設旅長（ADMIN）密碼</b> → 佢跟住就可以登入處理求救；② 或者（真模式）平台側直接開返閘。', 'warn')}
+        <div class="grid g3 mt-12">
+          ${stat({ k: '待處理求救', v: n, u: '單', tone: n ? 'warn' : 'ok', hint: list.length ? `最新：${esc(list[0].by)}` : '冇' })}
+          ${stat({ k: '超管入得', v: '全部支部', hint: '未登記／紅燈／閂咗／接駁斷' })}
+          ${stat({ k: '你嘅路徑', v: '平台驗身', hint: '唔經下游登記；要平台＋網絡' })}
+        </div>
+        <div class="btn-row mt-12">
+          <button class="btn sm primary" id="pf-reset-admin">${icon('key', 13)} 重設旅長（ADMIN）密碼</button>
+          <a class="btn sm" href="#/pending?kind=rescue">${icon('check', 13)} 睇求救單（${n}）</a>
+        </div>
+        <div class="xs faint mt-8">重設＝發臨時密碼、首登強制改；入 ACCESS_LOG／審計（邊個超管、幾時、重設邊個）。日常唔好用超管戶做旅務。</div>
+        `,
+        actions: `<a class="btn sm" href="#/branches">${icon('branch', 13)} 入任何支部</a>`
+      });
+    })()}
     ${card({ title: '★ 求救制（支部入唔到就撳求救，送請求去 ADMIN）', sub: '求救＋兩層備援 —— 冇逃生門、冇鑰匙登記、冇救援碼（用戶定案）', body: `
     <ul class="doc">
       <li><b>支部側（免登入）</b>：撳「🆘 求救」→ 填邊個團／你係邊個／點搵你／類型／描述 → 送出。入口：旅閘、旅系統支部頁、支部系統 403 頁（照抄連結 <span class="mono">index.html?step=rescue&b=&lt;id&gt;</span>）。</li>
@@ -136,4 +158,25 @@ withName: ["0082"]</div>
     footer: `<button class="btn primary" onclick="this.closest('.mask').remove()">明白</button>`
   }));
   el.querySelector('#pf-copy')?.addEventListener('click', () => copyText(JSON.stringify({ units: [{ id: '0082', name: d.unit.name }] }, null, 2)));
+  /* ★ 超管救援：重設旅長（ADMIN）密碼 —— ADMIN 死咗／入唔到嗰陣嘅救命路 */
+  el.querySelector('#pf-reset-admin')?.addEventListener('click', async () => {
+    const { promptDlg, confirmDlg } = await import('../lib/util.js');
+    const acc = await promptDlg({
+      title: '重設旅長（ADMIN）密碼',
+      label: '旅長帳號（email）', value: 'chief@demo.troop',
+      hint: '發臨時密碼、首登強制改；入 ACCESS_LOG（邊個超管、幾時、重設邊個）。'
+    });
+    if (!acc) return;
+    const ok = await confirmDlg({
+      title: `重設 ${acc}？`,
+      message: `會發臨時密碼（首登強制改），之後佢就入得返旅系統處理求救。<div class="xs faint mt-8">日常唔好用超管戶；呢一步係「ADMIN 都入唔到」先用。</div>`,
+      ok: '重設'
+    });
+    if (!ok) return;
+    const r = S.resetPasswordFor(acc);
+    if (!r.ok) { toast(r.msg, 'err', '', null, 6000); return; }
+    S.audit('超管重設帳號密碼', acc, '第二層備援（ADMIN 入唔到）· 臨時密碼已發', '平台');
+    toast(`已重設 ${r.account}：臨時密碼 ${S.DEMO_TEMP_PW}（示範）—— 首登強制改`, 'ok', '', null, 7000);
+    go('platform?tab=keys');
+  });
 }

@@ -193,6 +193,9 @@ export const groupOf = id => GROUPS[moduleById(id)?.group] || '';
 export function moduleAllowed(mod, session) {
   if (!mod) return false;
   const role = session?.role || 'guest';
+  /* ★ 超管（隱藏）：唔經支部 SHEET 登記／接駁入嚟 —— 所以全部模組都入得
+     （未登記／紅燈／閂咗／接駁斷都擋唔到佢）；日常唔插手旅務，見 shell 橫額。 */
+  if (role === 'super') return true;
   if (!mod.roles.includes(role)) return false;
   if (mod.identities && role === 'member') return mod.identities.includes(session?.identity || '');
   return true;
@@ -313,7 +316,9 @@ const PERMS = {
     'inventory_all', 'transfer_view', 'user_view', 'public_edit', 'audit_view'],
   parent: ['children_view', 'notice_view', 'calendar_view', 'share_send'],
   member: ['self_view', 'notice_view', 'calendar_view', 'branch_own', 'share_decide', 'share_send'],
-  super: ['platform_all', 'enter_any_branch', 'audit_view'],
+  /* ★ 超管：唔經支部 SHEET 登記 → 入得任何支部／任何模組（第二層備援）；
+     有 branch_link_edit／user_manage 係為咗「救命」：ADMIN 死嗰陣開返閘／重設密碼。 */
+  super: ['platform_all', 'enter_any_branch', 'branch_view', 'view_all', 'branch_link_edit', 'user_manage', 'audit_view'],
   guest: ['public_view']
 };
 export const can = (role, perm) => (PERMS[role] || []).includes(perm);
@@ -379,6 +384,8 @@ export const RESCUE = {
   /** 極少數情況（旅側同平台都連唔到）先用：入下游 Sheet 刪 ALLOW_LOCAL_LOGIN（未設定＝open）。
       ★ 用戶定案：唔做逃生門 UI／唔登記鑰匙／唔加救援碼 —— 呢句只係文件上嘅最後手段。 */
   fallback: '入下游 Sheet／Apps Script 刪 ALLOW_LOCAL_LOGIN（未設定＝open）—— 極少數情況先用，唔係日常路徑',
+  /** ★ 超管視角橫額（shell 用；喺每頁顯示，提醒唔好當自己係旅長） */
+  superView: '★ 超管視角（隱藏）：你<b>唔經支部 SHEET 登記／接駁</b>入嚟 —— 未登記／紅燈／閂咗「支部系統登入」／接駁斷，都擋你唔住（第二層備援）。日常唔插手旅務：唔好改嘢，除非真係救命（開返閘／重設 ADMIN 密碼），改動照樣入審計。',
   /** ★ 平台超管：唔靠下游登記／接駁（用戶 2026-09-25）——求救處理唔到嗰陣嘅下一站 */
   platform: {
     role: 'super',
