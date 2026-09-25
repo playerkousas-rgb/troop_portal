@@ -43,6 +43,7 @@ export function render(el, params, query = {}) {
   } else if (tab === 'modules') {
     body = `
     ${notice('模組註冊制：每個功能 = 一個模組（名、入口位置、所需權限、開關、說明頁）。<b>未登記不得直接加導航</b>。開關可以全旅開／全旅閂／指定支部。<br>★ <b>分享前設</b>：接收方要有該模組，先分享得到 —— 分享清單由呢張表過濾。', 'info')}
+    ${notice('★ <b>Q5 定案（2026-09-26）</b>：開關嘅<b>真相住旅 SHEET「模組開關」分頁</b>（改一次寫一次＋入 AUDIT_LOG，跟 Sheet 備份走）；ScriptProperties／CacheService 只做 5 分鐘快取，改動即清。<br>改得嘅只有<b>旅長</b>（支部可以反映，但唔可以自己開）；<b>閂咗模組＝隱藏，唔會刪資料</b> —— 開返即刻見返。', 'warn')}
     ${Object.entries(GROUPS).map(([gid, glabel]) => {
       const mods = moduleList().filter(m => m.group === gid);
       if (!mods.length) return '';

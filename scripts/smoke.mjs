@@ -76,6 +76,7 @@ const A = await import('../assets/js/lib/auth.js');
 const R = await import('../assets/js/lib/registry.js');
 const main = await import('../assets/js/main.js');
 const { gatePreflight } = await import('../assets/js/views/branches.js');
+const { normId } = await import('../assets/js/lib/util.js');
 
 await test('旅閘：未登入就顯示揀旅／登入', async () => {
   assert(text().includes('旅系統'), 'gate 冇顯示');
@@ -417,6 +418,73 @@ await test('★ 支部系統登入通道：UI 只有旅長見掣、教練員冇'
   const v2 = document.getElementById('view');
   assert(!v2.querySelector('[data-gate]'), '教練員唔應該有掣');
   assert(v2.textContent.includes('唔可以改'), '冇講明冇權');
+});
+
+await test('★ §13 定案：旅 ID 4 位補零（normId 單一實現）', async () => {
+  assert(normId('82') === '0082' && normId(' 82 ') === '0082', 'normId 冇補零至 4 位');
+  assert(normId('0082') === '0082' && normId('12a') === '0012A', 'normId 大寫／字母尾處理唔啱');
+  A.loginAs('u-chief');
+  main.boot();
+  fireHash(w, '#/system?tab=troop');
+  assert(document.getElementById('view').textContent.includes('補零至 4 位'), '系統頁冇標明 normId 規則');
+});
+
+await test('★ §13 定案：登入路線混合（接駁好嘅團＝一次登入，其餘＝轉去該團入口）', async () => {
+  const d = S.load();
+  const green = d.branches.find(b => b.id === 'cs0082');
+  assert(R.loginRouteFor(green) === 'one-stop', '已接駁＋測過連線嘅團應該行一次登入（M1）');
+  const yellow = d.branches.find(b => b.id === 'sc0082');
+  assert(R.loginRouteFor(yellow) === 'two-stop', '未測過連線／未接駁嘅團應該行 M3（轉去該團入口）');
+  const unreg = d.branches.find(b => b.id === 'gs0082');
+  assert(R.loginRouteFor(unreg) === 'two-stop', '未登記嘅團唔應該出一次登入');
+  assert(R.loginRouteMeta('one-stop').label.includes('M1') && R.loginRouteMeta('two-stop').label.includes('M3'), '路線標籤唔齊');
+  /* UI：支部登入頁要顯示行邊條路線（唔可以講到每個團都係一次登入） */
+  S.clearSession();
+  globalThis.location.search = '?step=login&path=branch&b=cs0082';
+  main.boot();
+  assert(text().includes('一次登入'), '已接駁嘅團，支部登入頁應該顯示「一次登入」');
+  globalThis.location.search = '?step=login&path=branch&b=sc0082';
+  main.boot();
+  assert(text().includes('轉去該團入口'), '未接駁嘅團，支部登入頁應該顯示「轉去該團入口」');
+  globalThis.location.search = '';
+  A.loginAs('u-chief');
+});
+
+await test('★ §13 定案：分層 cache（通告／活動 5 分鐘；財務／物資／進度 30 分鐘）＋強制刷新', async () => {
+  assert(R.cacheTtlOf('notices') === 5 && R.cacheTtlOf('calendar') === 5, '通告／活動應該 5 分鐘');
+  assert(R.cacheTtlOf('finance') === 30 && R.cacheTtlOf('inventory') === 30 && R.cacheTtlOf('progress') === 30, '財務／物資／進度應該 30 分鐘');
+  assert(R.cacheLabel('finance').includes('30 分鐘'), 'cache 標示唔啱');
+  A.loginAs('u-chief');
+  main.boot();
+  fireHash(w, '#/finance');
+  const v = document.getElementById('view');
+  assert(v.textContent.includes('30 分鐘') && v.querySelector('[data-force-refresh="finance"]'), '財務頁冇 cache 標示／強制刷新掣');
+  fireHash(w, '#/inventory');
+  assert(document.getElementById('view').querySelector('[data-force-refresh="inventory"]'), '物資頁冇強制刷新掣');
+  /* 強制刷新：唔可以爆，而且要入審計 */
+  const n0 = S.load().audit.length;
+  document.querySelector('[data-force-refresh="inventory"]').click();
+  await new Promise(r => setTimeout(r, 30));
+  assert(S.load().audit.length > n0 && String(S.load().audit[0].detail || '').includes('cache'), '強制刷新冇入審計');
+  S.commit(d => { d.audit = d.audit.filter(a => String(a.detail || '').indexOf('cache') < 0); }, { markDirty: true });
+});
+
+await test('★ §13 定案：模組開關（真相住旅 SHEET 分頁；閂咗＝隱藏唔刪；只限旅長）', async () => {
+  A.loginAs('u-chief');
+  main.boot();
+  fireHash(w, '#/system?tab=modules');
+  const v = document.getElementById('view');
+  const t = v.textContent;
+  assert(t.includes('旅 SHEET') && t.includes('模組開關') && t.includes('分頁'), '模組開關頁冇標明真相住邊');
+  assert(t.includes('隱藏') && t.includes('唔會刪資料'), '冇講清楚閂咗＝隱藏唔刪');
+  assert(t.includes('只有') && t.includes('旅長'), '冇講明改得嘅只有旅長');
+  assert(v.querySelector('[data-mod]'), '模組開關掣唔見咗');
+  /* 非旅長：唔應該見到呢個模組 */
+  A.loginAs('u-b-leader2');
+  main.boot();
+  fireHash(w, '#/system?tab=modules');
+  assert(!document.getElementById('view').textContent.includes('模組開關'), '支部人員唔應該見到模組開關');
+  A.loginAs('u-chief');
 });
 
 await test('★ 帳號下限：每個 leaf 至少留 1 個領袖戶（刪／停用會被擋）', async () => {

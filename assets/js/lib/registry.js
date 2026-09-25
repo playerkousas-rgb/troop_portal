@@ -186,6 +186,36 @@ export const MODULES = [
 ];
 
 export const moduleList = () => MODULES.slice().sort((a, b) => a.order - b.order);
+
+/* ★ 成員登入路線（用戶 2026-09-26 定案：混合 C ＝ M3 做底、接駁好嘅團升級 M1）
+   ＝ 團側零改動都照跑得；已登記＋綠燈＋測過連線嘅團，先出「一次登入」（M1）。
+   旅側只做門戶／傳遞，密碼 hash 永遠住該團 SHEET（BUILD §2 錨點）。 */
+export const LOGIN_ROUTES = [
+  { mode: 'one-stop', label: '一次登入（M1）', tone: 'g', desc: '喺旅閘打一次密碼就入 —— 旅側即刻經 sig 交該團驗（旅唔存密碼）' },
+  { mode: 'two-stop', label: '轉去該團入口（M3）', tone: 'y', desc: '旅閘只做門戶：帶你去該團入口，密碼由該團自己驗（團側零改動）' }
+];
+export const loginRouteMeta = mode => LOGIN_ROUTES.find(r => r.mode === mode) || LOGIN_ROUTES[1];
+/** 一個支部行邊條登入路線（未接駁＝M3；接駁好＋測過連線＝M1） */
+export function loginRouteFor(b) {
+  if (!b) return 'two-stop';
+  const link = b.link || {};
+  const ready = link.state === 'green' && !!link.testedAt && b.progressSource !== undefined;
+  return ready ? 'one-stop' : 'two-stop';
+}
+
+/* ★ 分層 cache 新鮮度（用戶 2026-09-26 定案：B 分層）
+   通告／活動／點名 5 分鐘；財務／物資／進度 30 分鐘；「強制刷新」清 cache。 */
+export const CACHE_MINUTES = { fast: 5, slow: 30 };
+export const CACHE_TIER = {
+  notices: 'fast', calendar: 'fast', rollcall: 'fast',
+  finance: 'slow', inventory: 'slow', progress: 'slow'
+};
+export const cacheTierOf = moduleId => CACHE_TIER[moduleId] || 'fast';
+export const cacheTtlOf = moduleId => CACHE_MINUTES[cacheTierOf(moduleId)];
+export const cacheLabel = moduleId => {
+  const m = cacheTtlOf(moduleId);
+  return m <= 5 ? '資料新鮮度：最多 5 分鐘（server-side cache）＋強制刷新' : `資料新鮮度：最多 ${m} 分鐘（server-side cache）＋強制刷新`;
+};
 export const moduleById = id => MODULES.find(m => m.id === id);
 export const groupOf = id => GROUPS[moduleById(id)?.group] || '';
 

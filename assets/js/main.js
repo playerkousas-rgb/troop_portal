@@ -8,6 +8,7 @@
      平台超管 → 隱藏入口（?step=super 或旅閘撳 ⚜ 五下），唔喺任何名單出現。
    ============================================================ */
 import { esc, icon, toast, modal, confirmDlg, fmtStamp, normId } from './lib/util.js';
+import { loginRouteFor, loginRouteMeta } from './lib/registry.js';
 import * as S from './lib/store.js';
 import { route, resolve, go, currentPath } from './lib/router.js';
 import { MODULES, GROUPS, moduleList, moduleAllowed, modulesForSession, moduleById, gateOfLink, gateMeta, RESCUE, rescueKindMeta } from './lib/registry.js';
@@ -312,7 +313,10 @@ function renderGate() {
           </div>
           <label class="f"><span class="lb">電郵</span><input type="text" id="lg-email" value="${esc(logins[0]?.email || '')}" autocomplete="username"></label>
           <label class="f"><span class="lb">密碼</span><input type="password" id="lg-pw" value="${esc(DEMO_PASSWORD)}" autocomplete="current-password"></label>
-          <div id="lg-err"></div>
+          <div class="xs faint">${route === 'one-stop'
+      ? `★ <b>呢個團行「一次登入」</b>：你喺呢度打密碼，旅側即刻經 sig 交 <b>${esc(b.name)}</b> 自己驗（旅唔會存你嘅密碼）—— 唔使再跳去第二個網址。`
+      : `★ <b>呢個團而家係「轉去該團入口」</b>：旅側只做門戶（未接駁／未測過連線），所以你登入完會去返該團自己嘅入口再打密碼。<span class="faint">旅長做齊登記＋測試連線之後，呢個團就會自動升級做「一次登入」。</span>`}</div>
+        <div id="lg-err"></div>
           <button class="btn primary block mt-8" id="lg-go">${icon('arrowR', 15)} 登入</button>
           <div class="flex-b mt-12 xs">
             <a href="#" id="lg-forgot">忘記密碼？</a>
@@ -416,6 +420,15 @@ function renderGate() {
   }
 }
 
+/* ---- ★ 強制刷新（Q4 定案：分層 cache ＋強制刷新掣） ---- */
+document.addEventListener('click', e => {
+  const btn = e.target.closest?.('[data-force-refresh]');
+  if (!btn) return;
+  const mod = btn.dataset.forceRefresh;
+  S.audit('強制刷新（清 cache）', mod, 'server-side cache 已清，下一次讀會即時向下游拉');
+  toast('已清 cache —— 下一次讀會即時向下游拉（' + mod + '）', 'ok');
+});
+
 /* ---- 支部人員登入（已揀團） ---- */
 function renderBranchLogin(gate, q) {
   const d = S.load();
@@ -439,13 +452,16 @@ function renderBranchLogin(gate, q) {
     return;
   }
   const logins = DEMO_BRANCH_LOGINS.filter(l => l.branchId === bid);
+  const route = loginRouteFor(b);
+  const rm = loginRouteMeta(route);
   gate.innerHTML = `
     <div class="login-wrap">
       <div class="gate-hero">
         <div class="logo" style="width:48px;height:48px;font-size:20px;background:${b.color}">${esc(String(b.section || b.name).slice(0, 2))}</div>
         <h1 style="font-size:22px">${esc(b.name)}</h1>
         <div class="faint sm">${esc(b.section)} · <span class="tag ${st.state === 'green' ? 'g' : 'y'} sm">${st.state === 'green' ? '已接駁' : '已登記 · 未閂口'}</span>
-          <span class="tag ${gateMeta(gate2).tone} sm">${gateMeta(gate2).label}</span></div>
+          <span class="tag ${gateMeta(gate2).tone} sm">${gateMeta(gate2).label}</span>
+          <span class="tag ${rm.tone} sm">${rm.label}</span></div>
       </div>
       <div class="card pad-l">
         ${noticeBox('★ <b>旅入口＝你嘅支部入口</b>：揀咗團，登入之後就直接入到<b>你支部個世界</b>（名冊、自己團通告、活動、物資），只係多咗「其他支部 share 俾你」嘅嘢 —— 唔使你另開一個支部系統、亦唔使再登多次。示範模式用以下帳號試身份差異：')}

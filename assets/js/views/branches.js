@@ -3,7 +3,7 @@ import { esc, icon, money, fmtDate, copyText, qrSvg, toast, sanitizeLabel, state
 import * as S from '../lib/store.js';
 import { go } from '../lib/router.js';
 import { page, card, stat, badge, linkBadge, table, kv, head, notice, progressBar, modal } from './ui.js';
-import { can, moduleEnabled, shareableTargets, visName, moduleList, GATE_STATES, gateOfLink, gateMeta, RESCUE, rescueMeta, rescueKindMeta } from '../lib/registry.js';
+import { can, moduleEnabled, shareableTargets, visName, moduleList, GATE_STATES, gateOfLink, gateMeta, loginRouteFor, loginRouteMeta, cacheLabel, RESCUE, rescueMeta, rescueKindMeta } from '../lib/registry.js';
 
 export function render(el) {
   const d = S.load();

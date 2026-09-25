@@ -3,7 +3,15 @@ import { esc, icon, money, fmtDate, toast, downloadFile, toCSV, promptDlg } from
 import * as S from '../lib/store.js';
 import { go } from '../lib/router.js';
 import { page, card, table, badge, notice, tabs, stat, kv, modal, progressBar, empty } from './ui.js';
-import { can } from '../lib/registry.js';
+import { can, cacheLabel } from '../lib/registry.js';
+
+/** ★ Q4 定案（2026-09-26）：分層 cache —— 財務／物資／進度 = 30 分鐘，通告／活動／點名 = 5 分鐘 */
+function cacheBar(moduleId, canForce = S.getSession()?.role === 'chief') {
+  return `<div class="flex-b mb-12" style="gap:8px">
+    <span class="xs faint">${esc(cacheLabel(moduleId))}</span>
+    ${canForce ? `<button class="btn xs" data-force-refresh="${moduleId}">${icon('refresh', 12)} 強制刷新（清 cache 再拉）</button>` : ''}
+  </div>`;
+}
 
 export function render(el, params, query = {}) {
   const tab = query.tab || 'overview';
@@ -24,6 +32,7 @@ export function render(el, params, query = {}) {
     const byBranch = d.financeSubmits.map(f => ({ ...f, depth: f.income - f.expense }));
     body = `
     ${notice('財務整合係<b>獨立分頁</b>：支部用<b>自己 key 簽</b>提交月度摘要（明細同憑證永遠留返支部自己張 Sheet），旅只存摘要＋核對。支部只睇自己；旅長睇晒。', 'info')}
+    ${cacheBar('finance')}
     <div class="grid g4 mt-12">
       ${stat({ k: '本月收入（全旅）', v: money(inc) })}
       ${stat({ k: '本月支出（全旅）', v: money(exp) })}

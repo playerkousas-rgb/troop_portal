@@ -3,7 +3,15 @@ import { esc, icon, toast, fmtDate } from '../lib/util.js';
 import * as S from '../lib/store.js';
 import { go } from '../lib/router.js';
 import { page, card, table, badge, notice, tabs, stat, modal, kv } from './ui.js';
-import { can } from '../lib/registry.js';
+import { can, cacheLabel } from '../lib/registry.js';
+
+/** ★ Q4 定案（2026-09-26）：分層 cache —— 財務／物資／進度 = 30 分鐘，通告／活動／點名 = 5 分鐘 */
+function cacheBar(moduleId, canForce = S.getSession()?.role === 'chief') {
+  return `<div class="flex-b mb-12" style="gap:8px">
+    <span class="xs faint">${esc(cacheLabel(moduleId))}</span>
+    ${canForce ? `<button class="btn xs" data-force-refresh="${moduleId}">${icon('refresh', 12)} 強制刷新（清 cache 再拉）</button>` : ''}
+  </div>`;
+}
 
 export function render(el, params, query = {}) {
   const tab = query.tab || 'list';
@@ -20,6 +28,7 @@ export function render(el, params, query = {}) {
   if (tab === 'list') {
     body = `
     ${notice('物資係<b>共享</b>嘅：顯示所屬支部 ＋ 申請借用（路由去 <b>owner</b> 批核，紀錄雙邊可見，批准自動扣庫存、歸還自動回補）。旅長睇晒所有支部嘅物資。', 'info')}
+    ${cacheBar('inventory')}
     <div class="grid g4 mt-12">
       ${stat({ k: '物資種類', v: d.inventory.length, u: '種' })}
       ${stat({ k: '共享中', v: d.inventory.filter(i => i.state === 'shared').length, u: '種', tone: 'ok' })}
