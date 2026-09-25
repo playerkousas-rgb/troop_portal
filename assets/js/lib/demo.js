@@ -287,7 +287,7 @@ export const DEMO_PUBLIC = {
 /** 帳號／權限：待批申請、邀請連結、跨團幫手 */
 export const DEMO_APPLICATIONS = [
   { id: 'a-1', kind: 'account', name: '林美好', email: 'lam@demo.troop', ymis: '', note: '想綁定子女 YMIS-2003（林浩然，童軍團）', at: D(-1) + ' 18:30', state: 'pending', need: '該團團長確認子女' },
-  { id: 'a-2', kind: 'helper', name: '李美儀', email: 'coach@demo.troop', fromBranch: 'cs0082', toBranch: 'gs0082', note: '幼童軍團長想兼幫小童軍團（本職團長兼幫 → 目標團批）', at: D(-2) + ' 15:00', state: 'pending', need: '目標團（小童軍團）團長批' },
+  { id: 'a-2', kind: 'helper', name: '李美儀', email: 'coach@demo.troop', fromBranch: 'cs0082', toBranch: 'gs0082', note: '教練員想兼幫小童軍團（旅層教練員加支部授權 → 目標團批）', at: D(-2) + ' 15:00', state: 'pending', need: '目標團（小童軍團）團長批' },
   { id: 'a-3', kind: 'member', name: '阮小明', ymis: 'YMIS-2099', branchId: 'sc0082', note: '自行申請開戶（成員）', at: D(-3) + ' 09:20', state: 'pending', need: '該團團長對名冊核對' },
   { id: 'a-4', kind: 'account', name: '郭嘉敏', email: '', ymis: 'YMIS-2006', note: '深資童軍執委申請開戶', at: D(-6) + ' 20:10', state: 'approved', need: '', decidedBy: '張偉業', decidedAt: D(-5) + ' 10:00' },
   { id: 'a-5', kind: 'publish', name: '童軍團', branchId: 'sc0082', note: '上報公開項目「小隊露營相簿」俾旅公開頁', at: D(-1) + ' 11:00', state: 'pending', need: '旅長批准對外發佈' }

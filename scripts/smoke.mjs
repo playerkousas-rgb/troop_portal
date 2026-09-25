@@ -341,9 +341,11 @@ const PAGES = [
   ['public.html', '', '公開資料'],
   ['notice.html', '?n=n-1', '通告'],
   ['notice.html', '?n=nope', '搵唔到'],
-  ['join.html', '?t=TROOP-LEAD-7F3A9C2E', '邀請開戶'],
+  ['join.html', '?t=TROOP-COA-7F3A9C2E', '教練員（旅層帳號'],      // 有效（教練員）
+  ['join.html', '?t=TROOP-MEM-5C7D1F2A', '該團支部 SHEET'],        // 有效（支部人員 → 落該團 SHEET）
+  ['join.html', '?t=TROOP-MEM-9A1C3E5G', '呢條連結已經用過'],      // 已用
+  ['join.html', '?t=TROOP-PAR-2B8D4E6F', '呢條連結已經過期'],      // 過期
   ['join.html', '?t=NOPE', '連結無效'],
-  ['join.html', '?t=TROOP-BRA-9A1C3E5G', '已用過'],
   ['borrow.html', '', '物資借用']
 ];
 let pageSeq = 0;

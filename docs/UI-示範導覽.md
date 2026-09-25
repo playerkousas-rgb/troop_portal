@@ -75,7 +75,7 @@ npm run check        # lint（語法／匯入圖／註冊表／CSS class／體�
 | 公開頁 | `public.html` | 只列等級 0 嘅嘢；「想睇多啲」分家長／成員／物資三路 |
 | 通告分享 | `notice.html?n=n-1` | 分享連結唔使密碼；報名（家長代填）、膳食／藥物備註、PDPO 同意、訂閱 |
 | 通告失效 | `notice.html?n=nope` | **誠實失敗**：唔會靜靜地彈第二張通告頂替 |
-| 邀請開戶 | `join.html?t=TROOP-COA-7F3A9C2E` | 有效 token → 開戶（教練員）；支部人員示範 `?t=TROOP-MEM-5C7D1F2A`（落該團 SHEET ＋ 填 YMIS／生日）；`?t=TROOP-MEM-9A1C3E5G`（已用）／`?t=NOPE`（無效）／過期都有專屬畫面 |
+| 邀請開戶 | `join.html?t=TROOP-COA-7F3A9C2E` | 有效 token → 開戶（教練員）；支部人員示範 `?t=TROOP-MEM-5C7D1F2A`（落該團 SHEET ＋ 填 YMIS／生日）；`?t=TROOP-MEM-9A1C3E5G`（已用）／`?t=TROOP-PAR-2B8D4E6F`（過期）／`?t=NOPE`（無效）各有專屬畫面 |
 | 物資借用 | `borrow.html` | 免登入只列「全生態共享」；切「生態內帳號」多見到「旅內共享」；旅部物資即時通過、支部物資待批 |
 
 ---
@@ -121,11 +121,11 @@ App 內已經有一頁「**功能藍圖**」（教學 → 功能藍圖，或 `#/
 
 ```bash
 npm run lint     # 語法、import/export 對唔對得上、註冊表規矩、CSS class 有冇定義、體積、金鑰／localhost 禁區
-npm run smoke    # jsdom（41 場景）：旅閘四條身份路、7 個視角（旅長／教練員／家長／成員／團長／超管／訪客）
+npm run smoke    # jsdom（43 場景）：旅閘四條身份路、7 個視角（旅長／教練員／家長／成員／團長／超管／訪客）
                  #        × 全部路由、15 模組 × 全部分頁、399 個掣逐個撳（連 async handler）、
                  #        公開頁 4 版（含失效／過期／已用 token）、報名／借用／開戶／財務確認／
                  #        物資批核／移交接收（transferId 冪等）／邀請前後台接通／未登記下游擋住／超管隱藏
 npm run check    # 以上全部
 ```
 
-現況：`lint` 全綠、`smoke` 41/41 通過、體積 584 KB（單檔最大 55 KB）。
+現況：`lint` 全綠、`smoke` 43/43 通過、體積 584 KB（單檔最大 55 KB）。
