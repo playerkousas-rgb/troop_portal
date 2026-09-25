@@ -41,7 +41,7 @@ export function render(el, params, query = {}) {
   /* 🆘 求救（免登入送嚟）：ADMIN 人手核實身份先做，唔會自動開任何嘢 */
   (d.rescues || []).filter(r => r.state !== 'done').forEach(r => items.push({
     kind: 'rescue', at: r.at, name: `${r.by}${r.branchId ? `（${S.branchName(r.branchId)}）` : ''}`,
-    sub: `🆘 ${rescueKindMeta(r.kind).label}：${r.note || '—'}　聯絡：${r.contact}`,
+    sub: `🆘 <b>${r.title || '（未填標題）'}</b>　嚴重度：${r.severity || '—'}　${rescueKindMeta(r.kind).label}：${r.note || '—'}　聯絡：${r.contact}`,
     need: 'ADMIN 人手核實身份後處理', state: 'pending', id: r.id, src: 'rescue'
   }));
 

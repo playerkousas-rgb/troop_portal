@@ -427,8 +427,57 @@ export const RESCUE = {
 
 /** 求救類型 meta */
 export const rescueKindMeta = id => RESCUE.kinds.find(k => k.id === id) || RESCUE.kinds[RESCUE.kinds.length - 1];
+/** 求救單 → 問題回報 TICK payload（求救單照入旅系統，同時可以送一張去 ADMIN） */
+export const rescueToIssue = r => REPORT.payload({
+  title: r.title || `求救：${rescueKindMeta(r.kind).label}`,
+  desc: `${r.note || ''}${r.branchId ? `\n\n支部：${r.branchId}` : ''}`,
+  severity: r.severity || '',          // 冇填 → 由白名單 fallback 落「高」（求救＝幾嚴重）
+  troopId: r.troopId || r.branchId || '',
+  name: r.by || '', contact: r.contact || ''
+});
 /** ADMIN 處理動作 meta */
 export const rescueMeta = id => RESCUE.actions.find(a => a.id === id) || { id: '', label: '' };
+
+/* ★ 問題回報：對正 Scout Admin「問題回報 TICK」合約（用戶 2026-09-26 指正）
+   ────────────────────────────────────────────────────────────────
+   ADMIN 張表真正收嘅格式（同一支 GAS、同一張表，同圖書館 report.html?app=圖書館 一樣）：
+     POST { type:'issue', sourceApp, title, desc, severity, troopId, name, contact }
+   ✗ 舊（我估錯）：kind:'issue' + message
+   ✓ 新（對正合同）：type:'issue' + title/desc/severity/troopId/name/contact
+   severity 白名單：低／中／高／緊急；亂填自動落「高」。
+   ⚠ 端點（Apps Script /exec URL）唔會出現喺前端：一律經同源 /api/proxy 由 server 側送出
+     （前端唔直接打 GAS —— 免得 CORS＋端點外露）；示範模式只入本機＋審計，唔會 fetch。 */
+export const REPORT = {
+  type: 'issue',
+  sourceApp: 'troop_portal',
+  severities: ['低', '中', '高', '緊急'],
+  defaultSeverity: '中',
+  fallbackSeverity: '高',                 // 亂填／陌生值 → 高
+  maxDesc: 2000,
+  maxTitle: 120,
+  /** 官方回報頁（後端未接駁時嘅誠實 fallback；ADMIN 同一支 GAS、同一張表） */
+  officialUrl: 'https://scout-admin-blue.vercel.app/report.html?app=troop_portal',
+  /** 把表單內容砌成合同 payload（只留 8 個欄位，唔會多帶） */
+  payload({ title = '', desc = '', severity = '', troopId = '', name = '', contact = '' } = {}) {
+    return {
+      type: 'issue',
+      sourceApp: REPORT.sourceApp,
+      title: String(title).trim().slice(0, REPORT.maxTitle),
+      desc: String(desc).trim().slice(0, REPORT.maxDesc),
+      severity: REPORT.severities.includes(severity) ? severity : REPORT.fallbackSeverity,
+      troopId: String(troopId).trim(),
+      name: String(name).trim(),
+      contact: String(contact).trim()
+    };
+  },
+  /** 送出前檢查（同 ADMIN 表單一致：標題＋詳情必填） */
+  check({ title = '', desc = '' } = {}) {
+    if (!String(title).trim()) return { ok: false, msg: '要填標題（一句）' };
+    if (!String(desc).trim()) return { ok: false, msg: '要填問題詳情' };
+    if (String(desc).length > REPORT.maxDesc) return { ok: false, msg: `問題詳情最多 ${REPORT.maxDesc} 字` };
+    return { ok: true };
+  }
+};
 
 /** ★ 分享種類：只做兩樣（2026-09-25 用戶定案）—— 通告 ＋ 活動（行事曆）
     其他種類（物資／進度／相簿／教材）留住個 kind 欄，但 UI 唔開，之後先加。 */

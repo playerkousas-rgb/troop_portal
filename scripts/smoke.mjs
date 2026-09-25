@@ -77,6 +77,7 @@ const R = await import('../assets/js/lib/registry.js');
 const main = await import('../assets/js/main.js');
 const { gatePreflight } = await import('../assets/js/views/branches.js');
 const { normId } = await import('../assets/js/lib/util.js');
+const RP = await import('../assets/js/lib/report.js');
 
 await test('旅閘：未登入就顯示揀旅／登入', async () => {
   assert(text().includes('旅系統'), 'gate 冇顯示');
@@ -691,6 +692,67 @@ await test('★ 超管：唔經支部 SHEET 登記 → 任何支部／模組都�
   A.loginAs('u-chief');
 });
 
+await test('★ 問題回報：對正 Scout Admin「問題回報 TICK」合同（type:issue；8 欄；嚴重度白名單）', async () => {
+  /* ① 合同＝唯一來源（registry.REPORT） */
+  assert(R.REPORT.type === 'issue' && R.REPORT.sourceApp === 'troop_portal', 'type／sourceApp 唔啱合同');
+  assert(R.REPORT.severities.join('/') === '低/中/高/緊急', '嚴重度白名單唔啱（ADMIN 收 低／中／高／緊急）');
+  /* ② payload 只帶 8 個欄位，同圖書館 report.html 一模一樣 */
+  const p1 = R.REPORT.payload({ title: ' x ', desc: ' y ', severity: '中', troopId: '0082', name: '陳小明', contact: 'x@y.hk', extra: '唔應該出現' });
+  assert(Object.keys(p1).sort().join(',') === 'contact,desc,name,severity,sourceApp,title,troopId,type', 'payload 欄位唔啱：' + Object.keys(p1).join(','));
+  assert(p1.title === 'x' && p1.desc === 'y' && p1.type === 'issue' && p1.sourceApp === 'troop_portal', 'payload 內容唔啱');
+  /* ③ 嚴重度：亂填 → 落「高」；空白 → 高 */
+  assert(R.REPORT.payload({ title: 't', desc: 'd', severity: '災難級' }).severity === '高', '亂填嚴重度應該落「高」');
+  assert(R.REPORT.payload({ title: 't', desc: 'd', severity: '' }).severity === '高', '冇嚴重度應該落「高」');
+  ['低', '中', '高', '緊急'].forEach(x => assert(R.REPORT.payload({ title: 't', desc: 'd', severity: x }).severity === x, '白名單值 ' + x + ' 俾人改咗'));
+  /* ④ 詳情上限 2000 字（同 ADMIN 表單一致） */
+  const long = R.REPORT.payload({ title: 't', desc: '字'.repeat(2500) });
+  assert(long.desc.length === R.REPORT.maxDesc, '詳情冇截到上限');
+  /* ⑤ 必填檢查（標題＋詳情） */
+  assert(R.REPORT.check({ title: '', desc: 'd' }).ok === false && R.REPORT.check({ title: 't', desc: '' }).ok === false, '必填檢查唔啱');
+  /* ⑥ 求救單 → issue payload（同一份可以去 ADMIN） */
+  const issue = R.rescueToIssue({ kind: 'locked', note: '入唔到', branchId: 'rs0082', by: '曾國強', contact: '9123 4567' });
+  assert(issue.type === 'issue' && issue.troopId === 'rs0082' && issue.name === '曾國強' && issue.severity === '高', '求救單轉 issue 唔啱');
+  /* ⑦ 送出（示範模式）：唔會 fetch，真係入本機紀錄＋審計 */
+  A.logout();
+  const n0 = (S.load().adminReports || []).length;
+  const sent = await RP.sendAdminReport({ title: 'UI 問題', desc: '示範：撳唔到掣', severity: '低', troopId: 'cs0082', name: '陳大文', contact: '9111 2222' });
+  assert(sent.ok && sent.mode === 'mock' && sent.payload.severity === '低', '示範模式送出失敗');
+  const rec = S.load().adminReports[0];
+  assert((S.load().adminReports || []).length === n0 + 1 && rec.payload.type === 'issue' && rec.payload.sourceApp === 'troop_portal', '問題回報冇入本機紀錄');
+  assert(S.load().audit.some(a => String(a.action || '').includes('問題回報')), '問題回報冇入審計');
+  /* ⑧ UI：求救頁三格（標題／嚴重度／問題詳情）＋後端未接駁時嘅誠實 fallback */
+  S.clearSession();
+  globalThis.location.search = '?step=rescue';
+  main.boot();
+  const t = text();
+  assert(t.includes('標題') && t.includes('嚴重度') && t.includes('問題詳情'), '求救表唔夠三格（要同 ADMIN 表單一樣）');
+  assert(t.includes('Scout Admin') && t.includes('問題回報'), '冇講明同一份送去 ADMIN 收件匣');
+  const official = document.querySelector('a[href*="scout-admin-blue.vercel.app/report.html"]');
+  assert(official, '冇官方回報頁 fallback');
+  assert(official.getAttribute('href') === R.REPORT.officialUrl, '官方回報頁連結唔啱（要帶 app=troop_portal）');
+  const tv = document.getElementById('rs-sev');
+  assert(tv && tv.options.length === 4, '嚴重度選項唔係四個');
+  assert(document.getElementById('rs-title') && document.getElementById('rs-note'), '標題／詳情欄唔見');
+  /* ⑨ 前端唔會直接打 GAS 端點（端點只喺 server 側） */
+  const src = readFileSync(join(ROOT, 'assets/js/lib/report.js'), 'utf8');
+  assert(src.includes('/api/proxy'), '問題回報唔係經 /api/proxy 送');
+  const hardcoded = /macros\/s\/[A-Za-z0-9_-]{20,}/;   // 真端點＝/macros/s/<長 token>/exec
+  assert(!hardcoded.test(src) && !hardcoded.test(readFileSync(join(ROOT, 'assets/js/main.js'), 'utf8')), '前端唔應該硬編碼 Apps Script 端點');
+  assert(!JSON.stringify(R.REPORT).includes('macros/s/'), 'REPORT 合同唔應該帶端點');
+  /* ⑩ server 側 proxy（api/proxy.js）：同一套白名單／fallback（前端＋後端兩邊都要守） */
+  const ApiProxy = await import('../api/proxy.js');
+  const sp = ApiProxy.buildIssuePayload({ title: ' t ', desc: ' d ', severity: '亂填', troopId: '0082', name: 'n', contact: 'c' });
+  assert(Object.keys(sp).sort().join(',') === 'contact,desc,name,severity,sourceApp,title,troopId,type', 'proxy payload 欄位唔啱');
+  assert(sp.severity === '高' && sp.title === 't' && sp.desc === 'd', 'proxy 白名單／trim 唔啱');
+  assert(ApiProxy.buildIssuePayload({ title: 't', desc: 'd', severity: '緊急' }).severity === '緊急', 'proxy 白名單值俾人改咗');
+  const proxySrc = readFileSync(join(ROOT, 'api/proxy.js'), 'utf8');
+  assert(/action === 'issue'/.test(proxySrc) && /501/.test(proxySrc), 'proxy 未實作 issue／未誠實失敗');
+  assert(proxySrc.includes('x-forwarded-for'), 'proxy 冇限流依據');
+  globalThis.location.search = '';
+  /* 清走示範測試紀錄（唔好污染示範資料） */
+  S.commit(d => { d.adminReports = []; d.audit = d.audit.filter(a => !String(a.action || '').includes('問題回報')); }, { markDirty: true });
+});
+
 await test('★ 求救制：入唔到撳求救（免登入）→ ADMIN 喺旅側處理（唔會自動開任何嘢）', async () => {
   /* 定義：同文件共用 RESCUE 一份（唔可以兩邊各寫一套） */
   assert(R.RESCUE.kinds.length >= 4, '求救類型唔夠（咩情況都要求救得到）');
@@ -702,14 +764,23 @@ await test('★ 求救制：入唔到撳求救（免登入）→ ADMIN 喺旅側
   /* ★ 免登入都用得：登出之後送求救（佢哋就係入唔到先求救） */
   A.logout();
   assert(!S.getSession(), '登出失敗');
-  const bad = S.addRescue({ branchId: 'gs0082', by: '', contact: 'x@y.hk', kind: 'link' });
+  const bad = S.addRescue({ branchId: 'gs0082', by: '', contact: 'x@y.hk', kind: 'link', title: 't', note: 'n' });
   assert(bad.ok === false && bad.msg.includes('你係邊個'), '唔填「你係邊個」竟然收貨');
-  const bad2 = S.addRescue({ branchId: 'gs0082', by: '陳小明', contact: '', kind: 'link' });
+  const bad2 = S.addRescue({ branchId: 'gs0082', by: '陳小明', contact: '', kind: 'link', title: 't', note: 'n' });
   assert(bad2.ok === false && bad2.msg.includes('點搵到你'), '唔留聯絡竟然收貨');
-  const r = S.addRescue({ branchId: 'gs0082', by: '陳小明（家長）', contact: 'lam@example.hk', kind: 'link', note: '睇唔到個仔嘅活動' });
+  /* ★ 新合同（同 ADMIN 表單一致）：標題＋詳情都必填 */
+  const bad3 = S.addRescue({ branchId: 'gs0082', by: '陳小明', contact: 'lam@example.hk', kind: 'link', note: '冇標題' });
+  assert(bad3.ok === false && bad3.msg.includes('標題'), '冇標題竟然收貨');
+  const bad4 = S.addRescue({ branchId: 'gs0082', by: '陳小明', contact: 'lam@example.hk', kind: 'link', title: '有標題冇詳情' });
+  assert(bad4.ok === false && bad4.msg.includes('問題詳情'), '冇問題詳情竟然收貨');
+  const r = S.addRescue({
+    branchId: 'gs0082', by: '陳小明（家長）', contact: 'lam@example.hk', kind: 'link',
+    title: '睇唔到個仔嘅活動', severity: '中', note: '睇唔到個仔嘅活動'
+  });
   assert(r.ok && r.id, '免登入送出求救失敗');
   const mine = S.rescueById(r.id);
   assert(mine.state === 'open' && mine.branchId === 'gs0082', '求救單冇寫入');
+  assert(mine.title === '睇唔到個仔嘅活動' && mine.severity === '中', '求救單冇存標題／嚴重度（對唔正 ADMIN 合同）');
   assert(S.rescuesPending() >= 1, '求救冇計入待辦');
 
   /* 求救只係請求：唔會自己開閘 */
@@ -747,14 +818,14 @@ await test('★ 求救制：入唔到撳求救（免登入）→ ADMIN 喺旅側
 
   /* 求救制：ADMIN 喺支部頁「開返支部系統登入」＝真係開到（已登記嘅團） */
   S.setBranchGate('sc0082', 'sig-only');
-  const r2 = S.addRescue({ branchId: 'sc0082', by: '黃子晴（副隊長）', contact: '6345 8899', kind: 'locked', note: '入唔到，想開返' });
+  const r2 = S.addRescue({ branchId: 'sc0082', by: '黃子晴（副隊長）', contact: '6345 8899', kind: 'locked', title: '支部系統登入被閂', note: '入唔到，想開返' });
   assert(r2.ok, '送出求救失敗');
   const g2 = S.resolveRescue(r2.id, { action: 'open-gate' });
   assert(g2.ok && S.branchGate('sc0082') === 'open', '求救「開返」應該真係開返個閘');
   assert(S.rescueById(r2.id).state === 'done' && S.rescueById(r2.id).done.action === 'open-gate', '開返之後求救單冇結案紀錄');
 
   /* 答覆結案：留低 ADMIN 回覆 */
-  const r3 = S.addRescue({ branchId: 'cs0082', by: '李美儀（團長）', contact: 'coach@demo.troop', kind: 'other', note: '問物資' });
+  const r3 = S.addRescue({ branchId: 'cs0082', by: '李美儀（團長）', contact: 'coach@demo.troop', kind: 'other', title: '想問物資安排', note: '問物資' });
   const rep = S.resolveRescue(r3.id, { action: 'reply', reply: '旅部物資要經物資頁申請。' });
   assert(rep.ok && S.rescueById(r3.id).reply.includes('物資頁'), '答覆冇留住');
   assert(S.resolveRescue(r3.id, { action: 'reply' }).ok === false, '已結案嘅求救單應該唔可以再處理');

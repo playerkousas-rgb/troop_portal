@@ -225,16 +225,35 @@ export const rescueById = id => rescues().find(r => r.id === id) || null;
 export const rescuesOf = branchId => rescues().filter(r => r.branchId === branchId);
 export const openRescues = () => rescues().filter(r => r.state !== 'done');
 /** 送求救（★ 免登入都用得：佢哋就係入唔到先求救） */
-export function addRescue({ branchId = '', by = '', contact = '', kind = 'other', note = '', via = '求救頁' } = {}) {
+export function addRescue({ branchId = '', by = '', contact = '', kind = 'other', title = '', severity = '', note = '', via = '求救頁' } = {}) {
   const at = nowStr();
   if (!String(by).trim()) return { ok: false, msg: '要填你係邊個（ADMIN 要搵得返你）' };
   if (!String(contact).trim()) return { ok: false, msg: '要留低點搵到你（電話或 email）' };
+  if (!String(title).trim()) return { ok: false, msg: '要填標題（一句）' };
+  if (!String(note).trim()) return { ok: false, msg: '要填問題詳情' };
   const id = 'r-' + Date.now().toString(36);
   commit(d => {
     d.rescues = d.rescues || [];
-    d.rescues.unshift({ id, at, branchId, by: String(by).trim(), contact: String(contact).trim(), kind, note: String(note).trim(), via, state: 'open' });
+    d.rescues.unshift({
+      id, at, branchId, by: String(by).trim(), contact: String(contact).trim(), kind,
+      title: String(title).trim(), severity: String(severity || '').trim(),
+      note: String(note).trim(), via, state: 'open'
+    });
   }, { markDirty: true });
   return { ok: true, id, at };
+}
+
+/* ★ 問題回報（Scout Admin TICK 合約）：示範模式＝入本機＋審計；真模式＝經 /api/proxy 由 server 側送出。
+   無論邊個模式，都唔會喺前端直接打 GAS 端點。 */
+export function addAdminReport(payload, { mode = 'mock', ok = true, error = '' } = {}) {
+  const at = nowStr();
+  const rec = { id: 'ar-' + Date.now().toString(36), at, mode, ok, error, payload };
+  commit(d => {
+    d.adminReports = d.adminReports || [];
+    d.adminReports.unshift(rec);
+    if (d.adminReports.length > 50) d.adminReports.length = 50;
+  }, { markDirty: true });
+  return { ok, at, id: rec.id };
 }
 /** ADMIN 處理求救：open-gate（開返支部系統登入）／reset-pw（重設密碼）／reply（答覆結案） */
 export function resolveRescue(id, { action = 'reply', reply = '', account = '', by = null } = {}) {

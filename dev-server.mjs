@@ -46,6 +46,28 @@ const server = createServer(async (req, res) => {
   const path = decodeURIComponent(url.pathname);
   const started = Date.now();
 
+  /* ---------- /api/proxy + action=issue：本機 sink（唔會真送去 ADMIN） ----------
+     ★ 點解：本機測試唔應該真係喺 ADMIN 收件匣開 TICK（真送係 Vercel 上 api/proxy.js 嘅事）。
+     所以 dev-server 只會 log 出「對正合同」嘅 payload，回一個明確標示「本機示範」嘅成功；
+     前端照樣行同一條 code path（sendAdminReport → POST /api/proxy）。 */
+  if (path === '/api/proxy' && req.method === 'POST') {
+    const raw = await new Promise(r => { let b = ''; req.on('data', c => b += c); req.on('end', () => r(b)); });
+    let body = null;
+    try { body = JSON.parse(raw || '{}'); } catch { body = null; }
+    if (!body || body.action !== 'issue') {
+      return json(res, 501, { success: false, error: `action='${body?.action || '(none)'}' 未實作（UI 先行；本機亦唔會代送）` });
+    }
+    const { buildIssuePayload } = await import('./api/proxy.js');
+    const payload = buildIssuePayload(body);
+    if (!payload.title || !payload.desc) return json(res, 400, { success: false, error: payload.title ? '要填問題詳情' : '要填標題（一句）' });
+    console.log(`[issue] 對正 Scout Admin 合同（本機 sink，冇真送）：${JSON.stringify(payload)}`);
+    return json(res, 200, {
+      success: true,
+      data: { type: payload.type, sourceApp: payload.sourceApp, severity: payload.severity, at: new Date().toISOString(), localSink: true },
+      note: '本機 dev-server 只做 sink（唔會真送 ADMIN）；真送＝Vercel 上 api/proxy.js。'
+    });
+  }
+
   /* ---------- /api/*：後端唔存在（UI 先行） ---------- */
   if (path.startsWith('/api/')) {
     const action = url.searchParams.get('action') || url.searchParams.get('a') || '';
@@ -113,5 +135,5 @@ server.listen(PORT, HOST, () => {
   支部系統登入通道  旅長 → 支部 → 揀團 →「接駁與登記」→ 開／閂（閂咗＝支部系統唔可以自己登入）
   🆘 求救          入唔到 → index.html?step=rescue（免登入）→ 旅長「待辦與批核 → 🆘 求救」處理
                    開返支部系統登入／重設密碼／答覆並結案（示範：樂行團長求救、家長求救）`);
-  console.log(`/api/* 暫時回 501（UI 先行，後端未實作）\n`);
+  console.log(`/api/* 暫時回 501（UI 先行，後端未實作）\n  /api/proxy + action=issue → 本機 sink（log 對正合同嘅 payload；唔會真送 ADMIN）\n`);
 });

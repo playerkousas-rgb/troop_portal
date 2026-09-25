@@ -210,17 +210,19 @@ export function renderDetail(el, { id }, query = {}) {
         actions: `<button class="btn sm" data-copy-rescue="${b.id}">${icon('copy', 13)} 複製求救連結</button>`,
         body: `
         ${notice('求救制（取代之前嘅「逃生門」）：<b>入唔到／有咩問題 → 撳求救掣，送請求去 ADMIN</b>。ADMIN 喺旅系統處理（開返支部系統登入／重設密碼／答覆）。<br><b>求救唔會自動開任何嘢</b> —— ADMIN 一定要人手核實身份先做（唔然任何人打個字就入得）。', 'info')}
+        ${notice('★ 求救表同 <b>Scout Admin「問題回報 TICK」對正合同</b>：標題 ＋ 嚴重度（低／中／高／緊急）＋ 問題詳情；送出時一份入旅系統求救單、一份以 <span class="mono">type:\'issue\'</span>（＋<span class="mono">sourceApp / troopId / name / contact</span>）經 <span class="mono">/api/proxy</span> 送去 ADMIN 收件匣 —— <b>ADMIN 張「問題回報」表唔使改任何嘢</b>。', 'info')}
         ${open.length ? `<div class="grid g3 mt-12">
           ${stat({ k: '待處理', v: open.length, u: '單', tone: 'warn' })}
           ${stat({ k: '最新', v: open[0].by, hint: open[0].at })}
           ${stat({ k: '類型', v: rescueKindMeta(open[0].kind).label, tone: 'n' })}
         </div>` : ''}
         ${table({
-          cls: 'tbl compact', head: ['時間', '邊個', '類型', '內容', '狀態', 'ADMIN 動作'],
+          cls: 'tbl compact', head: ['時間', '邊個', '標題 / 嚴重度', '類型', '內容', '狀態', 'ADMIN 動作'],
           rows: mine.map(r => ({
             cells: [
               `<span class="xs">${esc(r.at)}</span>`,
               `${esc(r.by)}<div class="xs faint">${esc(r.contact)}</div>`,
+              `<b>${esc(r.title || '（未填標題）')}</b><div class="xs faint">嚴重度：${esc(r.severity || '—')}</div>`,
               rescueKindMeta(r.kind).label,
               `${esc(r.note || '—')}${r.reply ? `<div class="xs faint">ADMIN 回覆：${esc(r.reply)}</div>` : ''}`,
               r.state === 'done' ? badge('已處理', 'g', true) : badge('待處理', 'y', true),

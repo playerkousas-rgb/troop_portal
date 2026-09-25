@@ -455,6 +455,7 @@ export function makeDemo() {
     publicProfile: JSON.parse(JSON.stringify(DEMO_PUBLIC)),
     applications: JSON.parse(JSON.stringify(DEMO_APPLICATIONS)),
     rescues: JSON.parse(JSON.stringify(DEMO_RESCUES)),
+    adminReports: [],                 // 送出嘅「問題回報」（Scout Admin TICK 合約；示範模式留本機紀錄）
     invites: JSON.parse(JSON.stringify(DEMO_INVITES)),
     shares: JSON.parse(JSON.stringify(DEMO_SHARES)),
     modules: {},                      // { moduleId: 'all' | 'off' | [branchId,…] }

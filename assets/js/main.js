@@ -8,7 +8,8 @@
      平台超管 → 隱藏入口（?step=super 或旅閘撳 ⚜ 五下），唔喺任何名單出現。
    ============================================================ */
 import { esc, icon, toast, modal, confirmDlg, fmtStamp, normId } from './lib/util.js';
-import { loginRouteFor, loginRouteMeta } from './lib/registry.js';
+import { loginRouteFor, loginRouteMeta, REPORT } from './lib/registry.js';
+import { sendAdminReport } from './lib/report.js';
 import * as S from './lib/store.js';
 import { route, resolve, go, currentPath } from './lib/router.js';
 import { MODULES, GROUPS, moduleList, moduleAllowed, modulesForSession, moduleById, gateOfLink, gateMeta, RESCUE, rescueKindMeta } from './lib/registry.js';
@@ -368,40 +369,59 @@ function renderGate() {
     gate.innerHTML = `
       <div class="gate-hero">
         <div class="logo" style="width:48px;height:48px;font-size:22px">🆘</div>
-        <h1 style="font-size:22px">求救</h1>
+        <h1 style="font-size:22px">求救 · 問題回報</h1>
         <div class="faint sm">入唔到／有咩問題都可以喺度講 —— 唔使登入（你就係入唔到先用得着）</div>
       </div>
       <div class="card pad-l">
-        ${noticeBox('送出之後，旅部（ADMIN）會喺旅系統見到呢張求救單，<b>人手核實身份</b>之後開返支部系統登入／重設密碼／答覆你。<br><b>求救唔會自動開任何嘢</b> —— 唔會有人打幾個字就入得。')}
-        <label class="f"><span class="lb">邊個支部</span>
-          <select id="rs-b">
-            <option value="">（唔肯定／其他）</option>
-            ${d.branches.map(x => `<option value="${x.id}" ${x.id === preB ? 'selected' : ''}>${esc(x.name)}（${esc(x.code)}）</option>`).join('')}
-          </select></label>
+        ${noticeBox('送出之後：① <b>旅部（ADMIN）</b>會喺旅系統見到呢張求救單，<b>人手核實身份</b>之後開返支部系統登入／重設密碼／答覆你；② 同一份會以 <b>問題回報 TICK</b> 送去 <b>Scout Admin 收件匣</b>（同圖書館／其他 APP 同一支 GAS、同一張「問題回報」表，ADMIN 唔使另外睇一個地方）。<br><b>求救唔會自動開任何嘢</b> —— 唔會有人打幾個字就入得。')}
+        <label class="f"><span class="lb">標題 ★</span><input type="text" id="rs-title" maxlength="${REPORT.maxTitle}" placeholder="一句講清楚：例「樂行團支部系統登入唔到」"></label>
+        <div class="grid g2">
+          <label class="f"><span class="lb">嚴重度</span>
+            <select id="rs-sev">${REPORT.severities.map(x => `<option value="${esc(x)}" ${x === REPORT.defaultSeverity ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></label>
+          <label class="f"><span class="lb">邊個支部（＝旅團號 troopId）</span>
+            <select id="rs-b">
+              <option value="">（唔肯定／其他）</option>
+              ${d.branches.map(x => `<option value="${x.id}" ${x.id === preB ? 'selected' : ''}>${esc(x.name)}（${esc(x.code)}）</option>`).join('')}
+            </select></label>
+        </div>
+        <label class="f"><span class="lb">問題詳情 ★（最多 ${REPORT.maxDesc} 字）</span><textarea id="rs-note" rows="4" maxlength="${REPORT.maxDesc}" placeholder="發生咩事？幾時開始？影響邊啲人？例：今晚活動要點名，但支部系統登入唔到（話已經閂咗），想開返。"></textarea></label>
+        <hr>
         <label class="f"><span class="lb">你係邊個（姓名／職位）★</span><input type="text" id="rs-by" placeholder="例：曾國強（樂行童軍團長）"></label>
         <label class="f"><span class="lb">點搵到你（電話／email）★</span><input type="text" id="rs-contact" placeholder="9123 4567 / you@example.hk"></label>
-        <label class="f"><span class="lb">類型</span>
+        <label class="f"><span class="lb">類型（幫 ADMIN 分流；唔影響送去 ADMIN 嘅格式）</span>
           <select id="rs-kind">${RESCUE.kinds.map(k => `<option value="${k.id}">${esc(k.label)}</option>`).join('')}</select></label>
-        <label class="f"><span class="lb">講清楚發生咩事</span><textarea id="rs-note" rows="4" placeholder="例：今晚活動要點名，但支部系統登入唔到（話己經閂咗），想開返。"></textarea></label>
         <div id="rs-err"></div>
-        <button class="btn primary block mt-8" id="rs-go">送出求救</button>
+        <button class="btn primary block mt-8" id="rs-go">送出去（旅部 ＋ ADMIN 收件匣）</button>
         <div class="xs faint mt-8">★ 一定填。${RESCUE.note}</div>
         <hr>
-        <div class="xs faint">其他人睇唔到呢張單（只有旅部 ADMIN）；送出之後你唔會即刻入得，等 ADMIN 覆你。</div>
+        <div class="xs faint">其他人睇唔到呢張單（只有旅部 ADMIN）；送出之後你唔會即刻入得，等 ADMIN 覆你。
+        送唔到（後端未接駁）時會老實講，並提供官方回報頁：<a href="${REPORT.officialUrl}" target="_blank" rel="noopener">scout-admin 問題回報</a>（同一個收件匣）。</div>
       </div>
       <div class="center mt-12"><button class="btn" id="rs-back">${icon('arrowL', 14)} 返旅閘</button></div>`;
     gate.querySelector('#rs-back').onclick = () => gateGo('unit');
-    gate.querySelector('#rs-go').onclick = () => {
+    gate.querySelector('#rs-go').onclick = async () => {
       const kindSel = gate.querySelector('#rs-kind');
       const kindLabel = rescueKindMeta(kindSel.value).label;
-      const res = S.addRescue({
-        branchId: gate.querySelector('#rs-b').value,
+      const form = {
+        title: gate.querySelector('#rs-title').value,
+        severity: gate.querySelector('#rs-sev').value,
+        troopId: gate.querySelector('#rs-b').value,
+        desc: gate.querySelector('#rs-note').value,
         by: gate.querySelector('#rs-by').value,
-        contact: gate.querySelector('#rs-contact').value,
-        kind: kindSel.value,
-        note: gate.querySelector('#rs-note').value
+        contact: gate.querySelector('#rs-contact').value
+      };
+      const res = S.addRescue({
+        branchId: form.troopId, by: form.by, contact: form.contact,
+        kind: kindSel.value, title: form.title, severity: form.severity, note: form.desc
       });
       if (!res.ok) { gate.querySelector('#rs-err').innerHTML = `<div class="err mb-8">${esc(res.msg)}</div>`; return; }
+      /* ★ 同一份 → Scout Admin「問題回報 TICK」（合約：type:'issue' ＋ 8 個欄位） */
+      const btn = gate.querySelector('#rs-go');
+      btn.disabled = true; btn.textContent = '送去旅部／ADMIN…';
+      const sent = await sendAdminReport({
+        title: form.title, desc: form.desc, severity: form.severity,
+        troopId: form.troopId, name: form.by, contact: form.contact
+      });
       gate.innerHTML = `
         <div class="gate-hero">
           <div class="logo" style="width:48px;height:48px;font-size:22px">✅</div>
@@ -409,7 +429,10 @@ function renderGate() {
           <div class="faint sm">編號 <span class="mono">${esc(res.id)}</span> · ${esc(res.at)}</div>
         </div>
         <div class="card pad-l">
-          ${noticeBox(`旅部（ADMIN）而家見到你張單：<b>${esc(kindLabel)}</b>`)}
+          ${noticeBox(`旅部（ADMIN）而家見到你張單：<b>${esc(kindLabel)}</b>｜嚴重度 <b>${esc(sent.payload?.severity || REPORT.defaultSeverity)}</b>`)}
+          ${sent.ok
+      ? `<div class="info-box">✅ 同一份已送去 <b>Scout Admin 收件匣</b>（${esc(sent.payload.sourceApp)} · type=issue）—— 會寫入「問題回報」表＋Email 通知。${sent.mode === 'mock' ? '（示範模式：只入本機紀錄，真模式先真送）' : ''}</div>`
+      : `<div class="warn-box">⚠️ 送唔到 ADMIN 收件匣：${esc(sent.msg)}<br>你可以改用官方回報頁（同一個收件匣）：<a href="${REPORT.officialUrl}" target="_blank" rel="noopener">${esc(REPORT.officialUrl)}</a></div>`}
           <div class="sm">跟住會發生咩事：<br>① ADMIN 核實你身份（可能打電話搵你——所以一定要留低聯絡）<br>② 佢喺旅系統撳「開返支部系統登入」或「重設密碼」<br>③ 佢覆你／打電話通知你，你再試登入</div>
           <div class="xs faint mt-8">求救單已經入紀錄（邊個送、幾時、ADMIN 點處理）。你唔會即刻入得 —— 呢個係「請求」，唔係自動開閘。</div>
         </div>
