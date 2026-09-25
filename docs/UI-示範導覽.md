@@ -174,7 +174,7 @@ App 內已經有一頁「**功能藍圖**」（教學 → 功能藍圖，或 `#/
 
 | 項目 | 狀態 | 幾時做 |
 |---|---|---|
-| `/api/*` | ✅ 已寫好 **9 支**（proxy／auth／super／units／downstreams／troop／registry／member-entry／share；本機 17 項測試綠）；**未上真 Vercel** | 跟 [後端部署步驟](後端部署步驟.md) 放 env |
+| `/api/*` | ✅ 已寫好 **9 支**（proxy／auth／super／units／downstreams／troop／registry／member-entry／share；本機 18 項測試綠）；**未上真 Vercel** | 跟 [後端部署步驟](後端部署步驟.md) 放 env |
 | 旅 `Code.gs`（白名單 action、ScriptLock、逐表寫自證、sig、掣、匯出匯入） | ✅ 已寫好（本機 23 項測試綠）；**未上真 Sheet** | 同上 §1–§2 |
 | `/api/troop`（分層 cache 5／30 分鐘）／`member-entry`／`share`／`registry` | ✅ 已做（P1 · 2026-09-26） | 真環境實測 |
 | 真 sig 讀寫（路 S） | 旅側已實作；未同真下游對打 | 等團側補 `handleSignedRequest` |
