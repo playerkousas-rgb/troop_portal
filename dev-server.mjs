@@ -55,7 +55,12 @@ const server = createServer(async (req, res) => {
     let body = null;
     try { body = JSON.parse(raw || '{}'); } catch { body = null; }
     if (!body || body.action !== 'issue') {
-      return json(res, 501, { success: false, error: `action='${body?.action || '(none)'}' 未實作（UI 先行；本機亦唔會代送）` });
+      /* 其他 action（旅 GAS 白名單等）→ **行真 handler**（api/proxy.js）：
+         未設 TROOP_<旅ID>_* env 就會誠實回 503 not_configured，唔會扮成功。 */
+      console.log(`[api] POST /api/proxy action=${body?.action || '(none)'} → 真 handler（本機）`);
+      const mod = await import('./api/proxy.js');
+      req.body = body;                       // ★ body 已經讀咗：交返俾 handler（唔係就會「要 JSON body」）
+      return await mod.default(req, res);
     }
     const { buildIssuePayload } = await import('./api/proxy.js');
     const payload = buildIssuePayload(body);
@@ -74,7 +79,12 @@ const server = createServer(async (req, res) => {
        · /api/downstreams      → 未設 TROOP_82_* env 就回 not_configured（唔會扮有）
        · /api/auth、/api/super → 未設 SESSION_SECRET／SUPER_KEY 就誠實拒
      只有 `issue` 例外（下面單獨處理）＝本機 sink，唔會真喺 ADMIN 開 TICK。 */
-  const API_ROUTES = { '/api/units': './api/units.js', '/api/downstreams': './api/downstreams.js', '/api/auth': './api/auth.js', '/api/super': './api/super.js' };
+  const API_ROUTES = {
+    '/api/units': './api/units.js', '/api/downstreams': './api/downstreams.js',
+    '/api/auth': './api/auth.js', '/api/super': './api/super.js',
+    '/api/troop': './api/troop.js', '/api/registry': './api/registry.js',
+    '/api/member-entry': './api/member-entry.js', '/api/share': './api/share.js'
+  };
   if (API_ROUTES[path]) {
     try {
       const mod = await import(API_ROUTES[path]);
@@ -153,5 +163,5 @@ server.listen(PORT, HOST, () => {
   支部系統登入通道  旅長 → 支部 → 揀團 →「接駁與登記」→ 開／閂（閂咗＝支部系統唔可以自己登入）
   🆘 求救          入唔到 → index.html?step=rescue（免登入）→ 旅長「待辦與批核 → 🆘 求救」處理
                    開返支部系統登入／重設密碼／答覆並結案（示範：樂行團長求救、家長求救）`);
-  console.log(`/api/* 現況（本機行真 handler）：\n  units／downstreams／auth／super → api/*.js（env 唔齊會回 not_configured，唔會扮成功）\n  proxy + action=issue          → 本機 sink（log 對正合同嘅 payload；唔會真送 ADMIN）\n  proxy + 旅 GAS action          → 未設 TROOP_<旅ID>_* env → 503 not_configured\n`);
+  console.log(`/api/* 現況（本機全部行真 handler，唔會扮成功）：\n  units／downstreams／auth／super／troop／registry／member-entry／share → api/*.js\n  proxy + action=issue          → 本機 sink（log 對正合同嘅 payload；唔會真送 ADMIN）\n  proxy + 其他 action            → 真 handler（要 session；未設 TROOP_<旅ID>_* env ＝ 503 not_configured）\n`);
 });

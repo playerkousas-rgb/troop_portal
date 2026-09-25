@@ -1065,7 +1065,8 @@ await test('示範模式：唔會嘗試連後端（冇 fetch 到任何網址）'
 
 await test('★ 本機 dev server 行真 /api handler（唔係另一套）：units／downstreams／auth／super', () => {
   const src = readFileSync(join(ROOT, 'dev-server.mjs'), 'utf8');
-  ['/api/units', '/api/downstreams', '/api/auth', '/api/super'].forEach(p => assert(src.includes(`'${p}':`), `dev-server 冇路由去真 handler：${p}`));
+  ['/api/units', '/api/downstreams', '/api/auth', '/api/super', '/api/troop', '/api/registry', '/api/member-entry', '/api/share'].forEach(p => assert(src.includes(`'${p}':`), `dev-server 冇路由去真 handler：${p}`));
+  assert(!/body\.action !== 'issue'[\s\S]{0,120}return json\(res, 501/.test(src), '非 issue 嘅 proxy action 應該行真 handler，唔應該一律 501');
   assert(/mod\.default\(req, res\)/.test(src), '應該真係叫 Vercel 嘅 default handler');
   assert(src.includes("'/api/proxy'"), 'proxy 路線唔見咗');
 });
