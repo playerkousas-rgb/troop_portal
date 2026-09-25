@@ -41,14 +41,29 @@ export function markBaseline(data = S.load()) {
 }
 
 /* ------------------------- 底層 ------------------------- */
-const jfetch = async (path, body) => {
+const rawPost = async (path, body) => {
   const r = await fetch(path, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin', body: JSON.stringify(body || {})
   });
   const j = await r.json().catch(() => null);
   if (!j) return { ok: false, code: 'bad_response', msg: `回應唔係 JSON（HTTP ${r.status}）` };
-  return j.success === true ? { ok: true, data: j.data, note: j.note } : { ok: false, code: j.code || 'fail', msg: j.error || '失敗', http: r.status };
+  return j.success === true ? { ok: true, data: j.data, note: j.note, http: r.status } : { ok: false, code: j.code || 'fail', msg: j.error || '失敗', http: r.status };
+};
+/** ★ 靜默刷新：session 靜靜到期會令做做下嘅嘢白做 —— 收到 401 就續期一次再重試（只一次，唔會無限迴圈） */
+const isMockSessionGuard = () => !isLive();
+let _retryOnce = false;
+const jfetch = async (path, body) => {
+  const out = await rawPost(path, body);
+  if (out.code === 'no_session' && !_retryOnce && !isMockSessionGuard()) {
+    _retryOnce = true;
+    try {
+      const { refreshSession } = await import('./auth.js');
+      const rf = await refreshSession();
+      if (rf.ok) return await rawPost(path, body);
+    } finally { _retryOnce = false; }
+  }
+  return out;
 };
 const guard = () => (isLive() ? null : { ok: false, code: 'mock', msg: '示範模式：唔會發任何請求' });
 

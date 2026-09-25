@@ -13,7 +13,11 @@ import crypto from 'node:crypto';
 export const config = { runtime: 'nodejs' };
 
 const PBKDF2 = { algo: 'pbkdf2-sha256', iter: 100000, keylen: 32, digest: 'sha256' };
-const SESSION_TTL_MS = 30 * 60 * 1000;
+const SESSION_TTL_MS = 30 * 60 * 1000;         // 單次 session 30 分鐘（BUILD §10 條 7）
+/* ★ 靜默刷新（sliding session）：剩 <10 分鐘就自動續期 —— 唔使做做下突然被踢。
+   但唔可以無限續：由**第一次登入**起最多 8 小時，之後一定要再登入一次。 */
+const SESSION_REFRESH_BEFORE_MS = 10 * 60 * 1000;
+const SESSION_MAX_MS = 8 * 60 * 60 * 1000;
 const FAIL = { max: 5, windowMs: 15 * 60 * 1000 };
 
 /* ------------------------- 密碼（公開測試用） ------------------------- */
@@ -100,6 +104,10 @@ const readBody = async req => {
 };
 const cookieOf = (req, name) => (String(req.headers?.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith(name + '=')) || '').slice(name.length + 1);
 const sessionCookie = token => `troop_session=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_MS / 1000}`;
+/* ★ 一齊發一張**讀得**嘅到期時間 cookie：前端唔會碰 HttpOnly 飛，但要知幾時夠鐘續期。
+   只係一個時間戳，冇身份、冇權限，改咗都冇用（真飛仍然 HttpOnly ＋ 簽名）。 */
+const expCookie = exp => `troop_exp=${Number(exp) || 0}; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_MS / 1000}`;
+const clearCookies = ['troop_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0', expCookie(0)];
 
 /* ------------------------- handler ------------------------- */
 export default async function handler(req, res) {
@@ -118,7 +126,22 @@ export default async function handler(req, res) {
     return s ? send(res, 200, { success: true, data: { email: s.email, role: s.role, unit: s.unit, exp: s.exp } }) : send(res, 401, { success: false, error: '冇 session／已過期' });
   }
   if (action === 'logout') {
-    return send(res, 200, { success: true, data: { loggedOut: true } }, { 'Set-Cookie': 'troop_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0' });
+    return send(res, 200, { success: true, data: { loggedOut: true } }, { 'Set-Cookie': clearCookies });
+  }
+
+  /* ---- 靜默刷新：session 仲有效 ＋ 未過 8 小時 → 換一張新飛（前端唔會見到任何嘢） ---- */
+  if (action === 'refresh') {
+    if (!secret) return send(res, 501, { success: false, error: '未設定 SESSION_SECRET', code: 'not_configured' });
+    const s = verifySession(cookieOf(req, 'troop_session'), secret);
+    if (!s) return send(res, 401, { success: false, error: '冇 session／已過期 —— 要重新登入', code: 'reauth_required' });
+    const born = Number(s.born || s.iat || 0);
+    if (born && Date.now() - born > SESSION_MAX_MS) {
+      return send(res, 401, { success: false, error: '連續登入 8 小時 —— 為安全起見要重新登入一次', code: 'reauth_required' },
+        { 'Set-Cookie': clearCookies });
+    }
+    const token = signSession({ email: s.email, role: s.role, unit: s.unit, branchId: s.branchId || '', identity: s.identity || '', pv: s.pv || 1, born: born || Date.now() }, secret);
+    return send(res, 200, { success: true, data: { email: s.email, role: s.role, unit: s.unit, exp: Date.now() + SESSION_TTL_MS, refreshed: true, maxUntil: (born || Date.now()) + SESSION_MAX_MS } },
+      { 'Set-Cookie': [sessionCookie(token), expCookie(Date.now() + SESSION_TTL_MS)] });
   }
 
   /* ---- 登入 ---- */
@@ -137,12 +160,12 @@ export default async function handler(req, res) {
       return send(res, 401, { success: false, error: `帳號或密碼唔啱${n >= 3 ? `（仲有 ${Math.max(0, FAIL.max - n)} 次就鎖 15 分鐘）` : ''}` });
     }
     clear(ip);
-    const token = signSession({ email: u.email, role: u.role, unit: unitEnv(unit).unit, branchId: u.branchId || '', identity: u.identity || '' }, secret);
+    const token = signSession({ email: u.email, role: u.role, unit: unitEnv(unit).unit, branchId: u.branchId || '', identity: u.identity || '', pv: u.pv || 1, born: Date.now() }, secret);
     await gas(unit, { action: 'saveAudit', actionName: 'LOGIN_OK', target: u.email, detail: `pv=${u.pv || 1}｜mustChangePw=${!!u.mustChangePw}`, via: 'api' });
     return send(res, 200, {
       success: true,
       data: { email: u.email, role: u.role, name: u.name, branchId: u.branchId || '', identity: u.identity || '', mustChangePw: !!u.mustChangePw, pv: u.pv || 1 }
-    }, { 'Set-Cookie': sessionCookie(token + '') });
+    }, { 'Set-Cookie': [sessionCookie(token + ''), expCookie(Date.now() + SESSION_TTL_MS)] });
   }
 
   /* ---- 改密碼（舊密碼正確，或者已有 session） ---- */
@@ -160,7 +183,7 @@ export default async function handler(req, res) {
     const h = hashPassword(body.newPassword);
     const r = await gas(unit, { action: 'changePassword', email: body.email, password_hash: h.hash, password_salt: h.salt, iter: h.iter });
     if (!r.ok) return send(res, 502, { success: false, error: r.msg, code: r.code });
-    return send(res, 200, { success: true, data: { changed: true, pv: r.data?.pv, iter: h.iter } }, { 'Set-Cookie': 'troop_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0' });
+    return send(res, 200, { success: true, data: { changed: true, pv: r.data?.pv, iter: h.iter } }, { 'Set-Cookie': clearCookies });
   }
 
   /* ---- 邀請開戶 ---- */

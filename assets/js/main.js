@@ -16,7 +16,7 @@ import { route, resolve, go, currentPath } from './lib/router.js';
 import { MODULES, GROUPS, moduleList, moduleAllowed, modulesForSession, moduleById, gateOfLink, gateMeta, RESCUE, rescueKindMeta } from './lib/registry.js';
 import {
   login, loginAs, logout, changePassword, DEMO_LOGINS, DEMO_BRANCH_LOGINS, DEMO_PASSWORD,
-  SUPER_EMAIL, branchEntryStatus, roleLabel
+  SUPER_EMAIL, branchEntryStatus, roleLabel, startSilentRefresh
 } from './lib/auth.js';
 
 import * as vDashboard from './views/dashboard.js';
@@ -64,6 +64,8 @@ route('docs', (p, q) => vDocs.render(viewEl(), p, q));
 export function boot() {
   S.load();
   if (!S.getSession()) { sessionStorage.removeItem('troop.mustPw'); return renderGate(); }
+  /* ★ 靜默刷新：session 30 分鐘會靜靜到期 —— 有登入就開始自動續期（示範模式零 fetch） */
+  startSilentRefresh(lost => toast(`要做一次重新登入：${lost?.msg || 'session 續唔到'}`, 'warn', '去登入', () => { logout(); renderGate(); }, 9000));
   renderShell();
   if (sessionStorage.getItem('troop.mustPw')) { sessionStorage.removeItem('troop.mustPw'); setTimeout(() => openChangePw(true), 250); }
 }

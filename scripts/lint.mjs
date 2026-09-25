@@ -215,9 +215,16 @@ for (const f of jsFiles.filter(f => f.includes('views/') || f.endsWith('.html'))
   }
 }
 // 死規矩：唔可以有 callback endpoint／定時器 提示
+//  例外：`// lint-allow: timer` 標明用途嘅**單一**定時器（現時只有 auth.js 嘅 session 靜默續期）——
+//  前端唔應該做自動化，但 session 到期係一定要自己排程，唔可以靠用戶記住。
 const forbidden = [/setInterval\s*\(/, /new\s+Trigger\s*\(/, /onEdit\s*\(/];
+const allowTimer = src => {
+  const lines = src.split('\n').filter((l, i, a) => !(a[i - 1] || '').includes('lint-allow: timer') && !l.includes('lint-allow: timer'));
+  return lines.join('\n');
+};
 for (const f of jsFiles.filter(f => f.includes('assets/js'))) {
-  const src = readFileSync(f, 'utf8');
+  const raw = readFileSync(f, 'utf8');
+  const src = allowTimer(raw);
   for (const re of forbidden) if (re.test(src)) fail(`前端唔應該出現定時器／觸發器：${rel(f)}`, String(re));
 }
 

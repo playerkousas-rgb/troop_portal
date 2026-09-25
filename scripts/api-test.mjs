@@ -103,6 +103,47 @@ t('proxy：匿名可寫面（免 session）＋唔准帶內部欄位', () => {
     assert(proxy.ANON_FORBID.includes(k), `匿名路徑要擋住欄位：${k}`);
   });
 });
+t('session：靜默刷新（滑動 30 分鐘、上限 8 小時、改 cookie 都冇用）', async () => {
+  const secret = 'test-secret-' + 'x'.repeat(20);
+  process.env.SESSION_SECRET = secret;
+  const call = async (cookie, body) => {
+    let out = null, headers = null;
+    const res = { setHeader(k, v) { headers = { ...(headers || {}), [k]: v }; }, statusCode: 0, end(t) { out = JSON.parse(t); } };
+    await auth.default({ method: 'POST', url: '/api/auth', headers: { cookie }, body }, res);
+    return { code: res.statusCode, body: out, headers };
+  };
+  const mk = (extra = {}) => auth.signSession({ email: 'a@b.c', role: 'chief', unit: '82', pv: 1, born: Date.now(), ...extra }, secret);
+  /* 有效 session → 換一張新飛，exp 要延長，同埋要帶住 born（唔可以無限續） */
+  const tok = mk();
+  const r1 = await call(`troop_session=${tok}`, { action: 'refresh' });
+  eq(r1.code, 200, '有效 session 應該續到');
+  assert(r1.body.data.exp > Date.now() + 20 * 60 * 1000, '新 exp 要接近 30 分鐘');
+  assert(String(r1.headers['Set-Cookie']).includes('troop_exp='), '要一齊發讀得嘅 troop_exp（前端排程）');
+  assert(String(r1.headers['Set-Cookie']).includes('HttpOnly'), '真飛要 HttpOnly');
+  const born = JSON.parse(Buffer.from(r1.headers['Set-Cookie'][0].split('.')[1], 'base64url').toString('utf8')).born;
+  assert(born && Math.abs(born - Date.now()) < 5000, 'born 要保留落去（8 小時上限靠佢）');
+  /* 8 小時上限：扮一個 born 喺 8 小時前嘅飛 → 唔可以續，要重新登入 */
+  const oldTok = mk({ born: Date.now() - 9 * 60 * 60 * 1000 });
+  const r2 = await call(`troop_session=${oldTok}`, { action: 'refresh' });
+  eq(r2.code, 401, '過咗 8 小時唔可以再續');
+  eq(r2.body.code, 'reauth_required', '要明確叫重新登入（前端會提示）');
+  assert(String(r2.headers['Set-Cookie']).includes('Max-Age=0'), '要清 cookie');
+  /* 過期／亂改嘅飛 → 401，唔會續 */
+  const expired = auth.signSession({ email: 'a@b.c', role: 'chief', unit: '82', pv: 1, born: Date.now() - 1000 }, secret, -1000);
+  eq((await call(`troop_session=${expired}`, { action: 'refresh' })).code, 401, '過期飛唔可以續');
+  eq((await call(`troop_session=${tok.slice(0, -3)}abc`, { action: 'refresh' })).code, 401, '改過簽名唔可以續');
+  eq((await call('', { action: 'refresh' })).code, 401, '冇飛唔可以續');
+  /* 前端：自動續期 ＋ 401 一次重試 */
+  const fs = await import('node:fs');
+  const fe = fs.readFileSync(new URL('../assets/js/lib/auth.js', import.meta.url), 'utf8');
+  assert(/export function startSilentRefresh/.test(fe) && /export async function refreshSession/.test(fe), '前端要有靜默刷新');
+  assert(/troop_exp/.test(fe) && !/troop_session=\(\[\^;\.\]\+/.test(fe), '前端讀 troop_exp，唔應該硬讀 HttpOnly 飛');
+  const api = fs.readFileSync(new URL('../assets/js/lib/api.js', import.meta.url), 'utf8');
+  assert(/no_session/.test(api) && /retryOnce/.test(api), '收到 401 應該續期一次再重試');
+  const mainSrc = fs.readFileSync(new URL('../assets/js/main.js', import.meta.url), 'utf8');
+  assert(/startSilentRefresh/.test(mainSrc), 'boot 要開始自動續期');
+});
+
 t('proxy：匿名可寫面真係入得閘（唔會跌去 501「未實作」）', async () => {
   /* ★ 呢個係回歸測試：ANON_GAS 加咗但路由閘冇跟 → 匿名請求會收到 501 UI 先行。
      呢度用真 handler 行一次（本機冇 env ＝ 應該係 503 not_configured，唔係 501）。 */

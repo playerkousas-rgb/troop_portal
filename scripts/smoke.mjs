@@ -1486,6 +1486,92 @@ await test('★ 平台開旅：scripts/units.mjs（units.json ＋ env 清單）�
   assert(/units\.mjs/.test(doc), '開旅 checklist 要提 units.mjs');
 });
 
+await test('★ 同步引擎：三色燈＋樂觀鎖＋merge3 逐格問（示範零 fetch；唔會自動揀）', async () => {
+  const SYNC = await import('../assets/js/lib/sync.js');
+  SYNC.resetSync();
+  /* 示範模式：一個請求都唔可以發（鐵律） */
+  let calls = 0;
+  const fake = { gasAction: async () => { calls++; return { ok: true, data: {} }; }, saveTables: async () => { calls++; return { ok: true }; } };
+  const mock = await SYNC.syncNow({ api: fake });
+  eq(mock.code, 'mock', '示範模式要老實講 mock');
+  eq(calls, 0, '示範模式零 fetch');
+  eq(SYNC.light().light, 'green', '乾淨＝綠燈');
+
+  /* 真模式（注入假 API 當後端）：同一格兩邊都改 → 唔可以自動揀 */
+  const d = S.load();
+  S.setMock(false);                                        // 扮真模式（唔會真連網：API 全部注入）
+  const baseNotice = { id: 'n-1', title: '旅露營', place: '西貢', quota: 30 };
+  SYNC.markBase({ notices: [baseNotice] });
+  /* 我改 title 同 place；佢改 title、place 同 quota → 只有 title／place 兩格兩邊都改過 */
+  const mine = [{ id: 'n-1', title: '旅露營（改）', place: '西貢（我改）', quota: 30 }];
+  const theirs = [{ id: 'n-1', title: '旅露營（佢改）', place: '西貢（佢改）', quota: 40 }];
+  let wrote = null;
+  const api2 = {
+    gasAction: async () => ({ ok: true, data: { tables: { notices: theirs }, version: 'v2' } }),
+    saveTables: async tb => { wrote = tb; return { ok: true, data: { version: 'v3' } }; }
+  };
+  const need = await SYNC.syncNow({ api: api2, tables: { notices: mine } });
+  eq(need.code, 'need_decisions', '同格衝突要問，唔可以靜靜揀');
+  eq(wrote, null, '未答之前一個字都唔可以寫');
+  eq(need.conflicts.length, 2, 'title 同 place 兩格都要問（quota 只有佢改 → 唔使問）');
+  assert(need.conflicts.every(c => c.key && c.key.includes('|')), '要俾 UI 每格一個 key');
+  assert(SYNC.state().pending.length === 2, '未答嘅問題要留底（下次再問）');
+  assert(SYNC.conflictList(need.asks)[0].label.includes('n-1'), 'UI 要有「邊一格」標籤');
+
+  /* 逐格揀：title 用我、quota 用佢 → 就係呢兩個結果 */
+  const decisions = {};
+  need.conflicts.forEach(c => { decisions[c.key] = c.field === 'title' ? 'mine' : 'theirs'; });
+  const done = await SYNC.syncNow({ api: api2, tables: { notices: mine }, decisions });
+  assert(done.ok, '答完就要寫得入：' + (done.msg || done.code));
+  const row = wrote.notices[0];
+  eq(row.title, '旅露營（改）', '揀「用我」＝保留我嘅');
+  eq(row.place, '西貢（佢改）', '揀「用佢」＝用後端嗰個');
+  eq(row.quota, 40, '只有佢改嘅欄＝自動跟佢（唔使問）');
+  eq(done.picked.mine + done.picked.theirs, 2, '要有逐格統計');
+  eq(SYNC.light().light, 'green', '寫入成功＝綠燈');
+  assert(SYNC.state().base.notices[0].quota === 40, '成功之後要推新 base（下次合併用）');
+
+  /* 無人看場（batch）：serverTime 新者勝，但一定要留底 */
+  SYNC.resetSync();
+  SYNC.markBase({ notices: [baseNotice] });
+  const batch = await SYNC.syncNow({ api: api2, mode: 'batch', tables: { notices: mine } });
+  assert(batch.ok, 'batch 要寫得入');
+  assert(batch.overwrote.length >= 1, '自動揀咗就要留底（overwrote）');
+
+  /* 送唔到 → 入本機隊列，唔會跌；燈號變黃／紅 */
+  SYNC.resetSync();
+  const bad = await SYNC.syncNow({ api: { gasAction: async () => ({ ok: false, code: 'network', msg: '斷線' }), saveTables: async () => ({ ok: false }) }, tables: { notices: mine } });
+  eq(bad.ok, false, '連唔到唔可以當成功');
+  assert(bad.queued >= 1 && SYNC.queueSize() >= 1, '要入本機隊列');
+  assert(['yellow', 'red'].includes(SYNC.light().light), '有未送＝唔可以係綠燈');
+  SYNC.resetSync();
+  S.resetDemo();
+});
+
+await test('★ 同步 UI：系統 →「同步」分頁（燈號卡＋即刻同步＋隊列＋逐格確認對話框）', async () => {
+  A.loginAs('u-chief');
+  main.boot();
+  fireHash(w, '#/system?tab=sync');
+  const t = text();
+  assert(t.includes('同步一次'), '要有「同步一次」卡：' + t.slice(0, 60));
+  assert(t.includes('三色燈'), '要講明三色燈係咩意思');
+  assert(t.includes('唔會自動揀') || t.includes('逐格問'), '要講明同格衝突唔會自動揀');
+  assert(document.querySelector('[data-sync]'), '要有「立即同步」掣');
+  assert(document.querySelector('[data-sync-batch]'), '要有「無人看場」掣');
+  assert(document.querySelector('[data-queue'), '要有隊列重試掣');
+  /* 示範模式撳落去：唔可以扮同步 */
+  document.querySelector('[data-sync]').click();
+  await new Promise(r => setTimeout(r, 30));
+  assert(/示範模式/.test(document.querySelector('#toasts')?.textContent || ''), '示範模式要老實講唔會假裝同步');
+  /* 逐格確認 UI：真衝突清單 render 得出（唔會自己揀） */
+  const sys = await import('../assets/js/views/system.js');
+  assert(typeof sys.render === 'function', 'system 模組要 render 到');
+  const src = readFileSync(join(ROOT, 'assets/js/views/system.js'), 'utf8');
+  assert(/askConflicts/.test(src) && /用我/.test(src) && /用佢/.test(src), '要有逐格確認對話框（用我／用佢）');
+  assert(/data-sync/.test(src) && /syncNow/.test(src), '掣要真係叫 syncNow（唔係假 UI）');
+  document.querySelectorAll('.mask').forEach(m => m.remove());
+});
+
 /* ---------- 互動掃描：撳晒所有掣，唔可以有例外 ---------- */
 const asyncErrors = [];
 process.on('unhandledRejection', e => asyncErrors.push(String(e && e.message ? e.message : e)));

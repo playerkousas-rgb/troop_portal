@@ -13,6 +13,7 @@
        旅要對得上該團（下游 SHEET）先入得到；未登記下游＝紅字講明，唔會靜靜地失敗。
    ============================================================ */
 
+import * as S from './store.js';
 import { commit, currentUser, load, setSession, clearSession, getSession, userById } from './store.js';
 import { toast, normId } from './util.js';
 import { ROLE_LABEL, identityMeta, titleMeta, ageFromDob, ageGroupOf, gateOfLink } from './registry.js';
@@ -82,6 +83,61 @@ export function loginAs(userId) {
 }
 
 export function logout() { clearSession(); }
+
+/* ★ 靜默刷新（BUILD §10 條 7）：session 30 分鐘，剩 <10 分鐘就自動續期；
+   連續最多 8 小時，之後老實叫你重新登入（唔會扮仍然有效）。
+   示範模式（_mock）零 fetch：一個請求都唔發。 */
+export const REFRESH_BEFORE_MS = 10 * 60 * 1000;
+let _refreshTimer = null, _refreshBusy = false, _refreshFail = 0;
+
+/* 真飛係 HttpOnly（前端讀唔到，亦唔應該讀到）；server 另外發一張**淨係到期時間**嘅
+   troop_exp cookie 俾前端排程，冇身份、冇權限、改咗都冇用。 */
+const expCookieMs = () => {
+  const m = document.cookie.match(/(?:^|;\s*)troop_exp=(\d+)/);
+  return m ? Number(m[1]) : 0;
+};
+/** session 幾時到期（0 ＝未登入／示範模式） */
+export function sessionExp() {
+  if (S.isMock()) return 0;                       // 示範模式冇真 session
+  return expCookieMs();
+}
+/** 續期一次；回 { ok, code, exp } */
+export async function refreshSession() {
+  if (S.isMock()) return { ok: false, code: 'mock' };
+  if (_refreshBusy) return { ok: false, code: 'busy' };
+  _refreshBusy = true;
+  try {
+    const r = await fetch('/api/auth', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+      body: JSON.stringify({ action: 'refresh' })
+    });
+    const j = await r.json().catch(() => null);
+    if (j && j.success === true) { _refreshFail = 0; return { ok: true, exp: j.data?.exp || 0, maxUntil: j.data?.maxUntil || 0 }; }
+    _refreshFail++;
+    return { ok: false, code: j?.code || 'fail', msg: j?.error || `HTTP ${r.status}` };
+  } catch (e) { _refreshFail++; return { ok: false, code: 'network', msg: String(e?.message || e) }; }
+  finally { _refreshBusy = false; }
+}
+/** 每分鐘望一次：夠鐘就靜靜續期；真係續唔到（8 小時／被踢）先至提示 */
+export function startSilentRefresh(onLost) {
+  if (S.isMock() || _refreshTimer) return _refreshTimer;
+  const tick = async () => {
+    const exp = sessionExp();
+    if (!exp) return;                              // 未登入（或已過期）→ 無事可做
+    if (exp - Date.now() > REFRESH_BEFORE_MS) return;
+    const r = await refreshSession();
+    if (!r.ok && r.code !== 'busy' && r.code !== 'mock') {
+      /* 續唔到：唔好扮成功 —— 講清楚，等人撳去重新登入 */
+      if (_refreshFail >= 2 || r.code === 'reauth_required') { stopSilentRefresh(); onLost && onLost(r); }
+    }
+  };
+  // lint-allow: timer（session 靜默續期；前端唯一准用嘅定時器）
+  _refreshTimer = setInterval(tick, 60 * 1000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+  window.addEventListener('online', tick);
+  return _refreshTimer;
+}
+export function stopSilentRefresh() { if (_refreshTimer) clearInterval(_refreshTimer); _refreshTimer = null; }
 
 export function changePassword(oldPw, newPw) {
   const s = getSession();

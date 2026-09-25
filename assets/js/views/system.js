@@ -5,10 +5,11 @@ import * as S from '../lib/store.js';
 import { go } from '../lib/router.js';
 import { page, card, table, badge, notice, tabs, stat, kv, modal, empty, progressBar } from './ui.js';
 import { moduleList, GROUPS, visName, ROLE_LABEL } from '../lib/registry.js';
+import * as SYNC from '../lib/sync.js';
 
 const TABS = [
   ['troop', '旅團設定'], ['modules', '模組開關'], ['backend', '後端實況'], ['audit', '審計與操作紀錄'],
-  ['automation', '自動化'], ['data', '資料與備份'], ['privacy', 'PDPO 與私隱'], ['keys', '接駁與金鑰']
+  ['automation', '自動化'], ['sync', '同步'], ['data', '資料與備份'], ['privacy', 'PDPO 與私隱'], ['keys', '接駁與金鑰']
 ];
 
 /** 備份狀態：示範模式由本機紀錄推算；真模式由 GAS `backupState` 覆寫（見 bindBackup） */
@@ -167,6 +168,39 @@ export function render(el, params, query = {}) {
       <li>財務提交日：儀表板「等你處理」會計入「未提交」嘅支部</li>
     </ul>` })}
     `;
+  } else if (tab === 'sync') {
+    const st = SYNC.state();
+    const li = SYNC.light();
+    const qn = SYNC.queueSize();
+    const tone = li.light === 'green' ? 'ok' : (li.light === 'red' ? 'danger' : 'warn');
+    body = `
+    ${notice('三色燈：<b>綠</b>＝後端同呢部機一致／<b>黃</b>＝有改動未寫入 或 上次失敗／<b>紅</b>＝連續失敗（改動暫存喺本機隊列，唔會跌）。燈號唔係裝飾 —— 見到黃色就代表仲有人未收到你嘅改動。', 'info')}
+    <div class="grid g3">
+      ${stat({ k: '後端狀態', v: li.label, tone })}
+      ${stat({ k: '未寫入改動', v: st.dirty || 0, u: '項', tone: st.dirty ? 'warn' : 'ok' })}
+      ${stat({ k: '本機隊列', v: qn, u: '筆', tone: qn ? 'warn' : 'ok' })}
+    </div>
+    ${card({ title: '同步一次（樂觀鎖 ＋ merge3）', sub: 'BUILD §3：三路合併；同一格兩邊都改 → 唔會自動揀，逐格問你', body: `
+      <div class="kv">
+        <dt>基準版本</dt><dd class="mono">${esc(st.baseVersion || '（未對齊）')}</dd>
+        <dt>上次成功</dt><dd>${st.lastAt ? esc(fmtStamp(new Date(st.lastAt).toISOString())) : '未試過'}</dd>
+        <dt>上次錯誤</dt><dd>${st.lastError ? esc(String(st.lastError)) : '冇'}</dd>
+        <dt>上次寫入</dt><dd>${(st.lastWrote || []).length ? esc((st.lastWrote || []).join('、')) : '—'}</dd>
+        <dt>上次逐格選擇</dt><dd>${st.lastConflictPicked ? `用我 ${st.lastConflictPicked.mine} 格／用佢 ${st.lastConflictPicked.theirs} 格` : '—'}</dd>
+      </div>
+      <div class="btn-row mt-8">
+        <button class="btn sm primary" data-sync>${icon('refresh', 13)} 立即同步（有衝突會逐格問）</button>
+        <button class="btn sm" data-sync-batch>${icon('clock', 13)} 無人看場（serverTime 新者勝）</button>
+        <button class="btn sm" data-queue>${icon('upload', 13)} 重試本機隊列（${qn}）</button>
+      </div>
+      ${(st.pending || []).length ? `<div class="mt-12">${notice(`有 ${st.pending.length} 格未答（上次同步中途停低）—— 撳「立即同步」會再問你一次。`, 'warn')}</div>` : ''}
+      <div class="xs faint mt-8">示範模式：零 fetch（唔會真連後端）；真模式經同源 <span class="mono">/api/proxy</span>，apikey 只喺 server 側注入。</div>` })}
+    ${card({ title: '離線隊列（≤200 筆）', sub: '送唔到唔會跌：入本機隊列，backoff ＋ jitter 重試', body: (() => {
+        const q = SYNC.queueSize();
+        return q ? `${notice(`本機仲有 ${q} 筆未送（最多 200 筆，滿咗就唔會再加 —— 唔會靜靜跌舊嘢）。`, 'warn')}
+          <div class="btn-row mt-8"><button class="btn sm" data-queue2>${icon('upload', 13)} 即刻重試</button></div>`
+          : `<div class="empty">${icon('check', 22)}<div class="mt-8"><b>隊列乾淨</b></div><div class="sm faint mt-8">冇未送嘅改動。</div></div>`;
+      })() })}`;
   } else if (tab === 'data') {
     body = `
     <div class="grid g3">
@@ -311,6 +345,14 @@ export function render(el, params, query = {}) {
 }</div><div class="xs faint mt-8">示範模式：數字係假嘅。真模式呢個檢查會直接講「邊張 Sheet、有咩分頁、各幾多行、對唔對得上名冊」。</div>`,
     footer: `<button class="btn primary" onclick="this.closest('.mask').remove()">明白</button>`
   }));
+  el.querySelector('[data-sync]')?.addEventListener('click', () => runSync(el, 'ask'));
+  el.querySelector('[data-sync-batch]')?.addEventListener('click', () => runSync(el, 'batch'));
+  [el.querySelector('[data-queue]'), el.querySelector('[data-queue2]')].forEach(b => b?.addEventListener('click', async () => {
+    if (!API.isLive()) return toast('示範模式：唔會真送（隊列係真模式先有）', '');
+    const r = await SYNC.drainQueue();
+    toast(r.ok ? `已送走 ${r.sent} 筆` : `仲送唔到（${r.msg || r.code}）—— 留住 ${r.remaining ?? ''} 筆，等下次`, r.ok ? 'ok' : 'err');
+    go('system?tab=sync');
+  }));
   el.querySelector('[data-repair]')?.addEventListener('click', () => { S.audit('修復後端', d.unit.name, '示範：清舊版本段／垃圾行'); toast('修復完成（示範）：清 0 行垃圾、0 段舊版本', 'ok'); });
   el.querySelector('[data-force]')?.addEventListener('click', async () => {
     const { confirmDlg } = await import('../lib/util.js');
@@ -363,6 +405,49 @@ export function render(el, params, query = {}) {
   });
   el.querySelector('[data-print]')?.addEventListener('click', () => window.print());
   el.querySelector('[data-consent-text]')?.addEventListener('click', () => copyText(CONSENT));
+}
+
+/* ---------- 同步：即場做一次（有衝突＝逐格問，唔會自動揀） ---------- */
+async function runSync(el, mode) {
+  if (!API.isLive()) return toast('示範模式：零 fetch —— 唔會假裝同步（真模式先會連後端）', '');
+  const r = await SYNC.syncNow({ mode });
+  if (r.ok) {
+    toast(`已同步：${r.wrote.length ? r.wrote.join('、') : '冇改動'}${r.overwrote.length ? `（${r.overwrote.length} 格用 serverTime 新者勝，已留底）` : ''}`, 'ok', '', null, 6000);
+    return go('system?tab=sync');
+  }
+  if (r.code === 'need_decisions') return askConflicts(el, r.conflicts);
+  toast(`同步未成（${r.msg || r.code}）${r.queued ? `—— 已暫存 ${r.queued} 筆喺本機隊列` : ''}`, 'err', '', null, 7000);
+  go('system?tab=sync');
+}
+
+/** 逐格確認：每一格只問一句「用我／用佢」，唔會幫你揀 */
+function askConflicts(el, conflicts = []) {
+  const row = c => `<tr>
+    <td><div class="bold">${esc(c.label)}</div><div class="xs faint mono">${esc(String(c.mine ?? ''))} ／ ${esc(String(c.theirs ?? ''))}</div></td>
+    <td class="nowrap"><label class="check"><input type="radio" name="cf-${c.i}" value="mine" checked> 用我</label></td>
+    <td class="nowrap"><label class="check"><input type="radio" name="cf-${c.i}" value="theirs"> 用佢</label></td>
+  </tr>`;
+  const m = modal({
+    title: `同一格兩邊都改過：逐格揀（${conflicts.length} 格）`,
+    wide: true,
+    body: `${notice('呢啲格仔<b>兩邊都改過</b>：系統唔會幫你自動揀。冇揀嘅＝保持你嘅版本。（其餘唔同欄嘅改動會自動合併，唔會問你。）', 'warn')}
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>邊一格</th><th>我嘅版本</th><th>佢嘅版本</th></tr></thead>
+      <tbody>${conflicts.map(row).join('')}</tbody></table></div>
+      <div class="xs faint mt-8">「佢」＝後端最新；「我」＝你呢部機。揀完會即刻寫返後端，並記入本機同步紀錄。</div>`,
+    footer: `<button class="btn" data-cancel>取消（留返隊列）</button><button class="btn primary" data-ok>套用並同步</button>`,
+    onMount: (dlg, close) => {
+      dlg.querySelector('[data-cancel]').onclick = close;
+      dlg.querySelector('[data-ok]').onclick = async () => {
+        const decisions = {};
+        conflicts.forEach(c => { decisions[c.key] = dlg.querySelector(`input[name="cf-${c.i}"]:checked`)?.value || 'mine'; });
+        close();
+        const r2 = await SYNC.syncNow({ decisions });
+        if (r2.ok) { toast(`逐格揀完，已同步（用我 ${r2.picked?.mine ?? 0} 格／用佢 ${r2.picked?.theirs ?? 0} 格）`, 'ok', '', null, 6000); el.innerHTML = ''; go('system?tab=sync'); }
+        else { toast(`套用之後仲未成（${r2.msg || r2.code}）`, 'err'); el.innerHTML = ''; go('system?tab=sync'); }
+      };
+    }
+  });
+  return m;
 }
 
 const CONSENT = `【個人資料收集同意書（家長同意）】

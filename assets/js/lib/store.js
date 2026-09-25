@@ -74,6 +74,11 @@ export const isMock = () => !!load()._mock;
 export const dirtyCount = () => dirty;
 export function markSaved() { dirty = 0; notify(); }
 /** 重新載入示範資料（示範模式專用；真模式 = 由後端拉） */
+/** 測試用：切換示範／真模式（真模式只可以注入假 API 嚟試，唔會真連網） */
+export function setMock(on = true) {
+  data = load(); data._mock = !!on; write(K_DATA, data); notify();
+  return isMock();
+}
 export function resetDemo() {
   data = makeDemo();
   write(K_DATA, data);
