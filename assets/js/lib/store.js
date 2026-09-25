@@ -175,7 +175,7 @@ export function setEscOwner(branchId, { email = '', note = '' } = {}) {
 }
 /** 本地逃生門紀錄（下游寫 ESC_LOG；旅側握手時讀返） */
 export const branchEscape = branchId => branchById(branchId)?.link?.esc || null;
-/** 上次已處理嘅逃生門（接受／再閂返） */
+/** 上次旅長重新落決定之後嘅紀錄（用嚟講「呢次 ⚠ 係幾時清嘅」） */
 export const branchEscapeAck = branchId => branchById(branchId)?.link?.escAck || null;
 /** 旅側記錄 vs 下游真相：唔一致 ＝ 有人用過逃生門（或者下游被改過） */
 export function gateMismatch(branchId) {
@@ -185,30 +185,9 @@ export function gateMismatch(branchId) {
   const known = typeof truth === 'boolean';
   return { mismatch: known && truth !== gateAllowsLocalLogin(gateOfLink(b.link)), known, truth };
 }
-/** 旅長拍板：accept＝接受本地解鎖（記錄改為開，唔發 sig：下游本身已經係開）；
-    relock＝再閂返（一樣行 sig setGate） */
-export function resolveEscape(branchId, mode = 'relock') {
-  const u = currentUser();
-  const at = nowStr();
-  if (mode !== 'accept') return setBranchGate(branchId, 'sig-only');
-  const b = branchById(branchId);
-  if (!b) return { ok: false, msg: '搵唔到呢個支部' };
-  if (!b.link?.esc) return { ok: false, msg: '冇待處理嘅本地解鎖' };
-  const res = commit(d => {
-    const t = d.branches.find(x => x.id === branchId);
-    t.link.gate = 'open';
-    t.link.localLogin = true;
-    t.link.state = 'yellow';
-    t.link.gateBy = u?.name || getSession()?.email || '';
-    t.link.gateAt = at;
-    t.link.note = '旅知悉本地解鎖並接受：兩條通道都開';
-    t.link.esc = null;
-    t.link.escAck = { at, by: u?.name || '', mode: 'accept' };
-    const dn = (d.downstream || {})[branchId];
-    if (dn) { dn.localLogin = true; dn.escOpened = false; }
-  }, { markDirty: true });
-  return { ok: true, at, by: u?.name || '', gate: 'open', result: res };
-}
+/* ★ 用戶定案（2026-09-25）：逃生門用過之後**只提示**，唔設「接受／再閂返」拍板掣 ——
+   旅側記錄照舊當閂；旅長想改就照用上面嘅「閂支部系統登入／開返支部系統登入」兩個掣。
+   （冇 resolveEscape／冇一次性救援碼：唯一解鎖路徑＝Sheet 級手動解鎖。） */
 
 /** ★ 支部版面：各支部自家設計，之後照抄入嚟（旅側唔另設一套） */
 export const branchLayout = id => (id === 'troop' ? null : (branchById(id)?.layout || null));
