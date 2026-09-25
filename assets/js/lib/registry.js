@@ -318,6 +318,14 @@ const PERMS = {
 export const can = (role, perm) => (PERMS[role] || []).includes(perm);
 /** ★ 分享嘅接收／退回：該支部執委或以上（rank ≥ 3）；旅長／教練員可以代勞 */
 export const canDecideShare = (role, rank = 0) => ['chief', 'coach'].includes(role) || Number(rank) >= 3;
+
+/** ★ 分享種類：只做兩樣（2026-09-25 用戶定案）—— 通告 ＋ 活動（行事曆）
+    其他種類（物資／進度／相簿／教材）留住個 kind 欄，但 UI 唔開，之後先加。 */
+export const SHARE_KINDS = [
+  { id: 'notice', label: '通告', to: '通告頁', icon: 'megaphone' },
+  { id: 'event', label: '活動（行事曆）', to: '行事曆', icon: 'calendar' }
+];
+export const shareKind = id => SHARE_KINDS.find(k => k.id === id) || null;
 export const PERMS_OF = role => (PERMS[role] || []).slice();
 /** 權限總表用：角色欄 ＋ 權限清單（中文標籤） */
 export const MODULE_ROLE_COLS = ['chief', 'coach', 'parent', 'member'];

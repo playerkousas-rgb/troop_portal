@@ -14,7 +14,8 @@ export function render(el, params, query = {}) {
   const q = String(query.q || '').toLowerCase();
   const scope = query.scope || 'all';
   let rows = all;
-  if (scope !== 'all') rows = rows.filter(n => (scope === 'troop' ? n.scope === 'troop' : n.scope === 'branch'));
+  if (scope === 'share') rows = [];
+  else if (scope !== 'all') rows = rows.filter(n => (scope === 'troop' ? n.scope === 'troop' : n.scope === 'branch'));
   if (query.status) rows = rows.filter(n => n.status === query.status);
   if (query.cat) rows = rows.filter(n => n.category === query.cat);
   if (q) rows = rows.filter(n => (n.title + n.body).toLowerCase().includes(q));
@@ -27,7 +28,7 @@ export function render(el, params, query = {}) {
   const body = `
   ${notice('通告頁 = 本單位通告 ＋ <b>你已訂閱嘅圖書館通告</b> ＋ <b>已接收嘅分享</b>（同頁同列表、來源標示）。分享俾其他支部之前，對方一定要有<b>通告模組</b>（由註冊表過濾）；★ 對方<b>接收咗先會出現</b>喺度（未接收＝喺「分享中心 · 待接收」）。', 'info')}
   ${shared.length ? card({
-    title: `來自其他支部（${shared.length}）`, sub: '你哋接收咗嘅分享 —— 標明來源，可去分享中心收回',
+    title: `來自其他支部（${shared.length}）`, sub: '你哋接收咗嘅<b>通告</b>分享 —— 標明來源，可去分享中心收回；活動分享喺行事曆',
     body: `<div class="grid" style="gap:10px">${shared.map(x => `
       <div class="pub-notice">
         <div class="flex-b"><div class="grow">
@@ -40,13 +41,14 @@ export function render(el, params, query = {}) {
   }) : ''}
   ${toolbar(`
     ${searchBox('nt-q', '搜尋標題／內容…')}
-    ${selectBox('nt-scope', [{ v: 'all', l: '全部來源' }, { v: 'troop', l: '旅通告' }, { v: 'branch', l: '支部通告' }], scope)}
+    ${selectBox('nt-scope', [{ v: 'all', l: '全部來源' }, { v: 'troop', l: '旅通告' }, { v: 'branch', l: '支部通告' }, { v: 'share', l: `已接收分享${shared.length ? '（' + shared.length + '）' : ''}` }], scope)}
     ${selectBox('nt-status', [{ v: '', l: '全部狀態' }, { v: 'published', l: '已發佈' }, { v: 'draft', l: '草稿' }], query.status || '')}
     ${selectBox('nt-cat', [{ v: '', l: '全部分類' }, ...cats.map(c => ({ v: c, l: c }))], query.cat || '')}
     <span class="grow"></span>
     ${can(role, 'notice_publish') ? `<button class="btn primary" id="nt-new">${icon('plus', 15)} 開一張通告</button>` : ''}
   `)}
-  ${card({ body: rows.length ? `<div class="grid" style="gap:10px">${rows.map(rowHtml).join('')}</div>` : empty('冇通告') })}
+  ${card({ body: rows.length ? `<div class="grid" style="gap:10px">${rows.map(rowHtml).join('')}</div>`
+    : empty(scope === 'share' ? (shared.length ? '分享通告喺上面嗰組（來自其他支部）' : '未有已接收嘅通告分享') : '冇通告') })}
   `;
   el.innerHTML = page({
     title: '通告', sub: `共 ${rows.length} 條 · 已發佈 ${all.filter(n => n.status === 'published').length} · 草稿 ${all.filter(n => n.status === 'draft').length}`,

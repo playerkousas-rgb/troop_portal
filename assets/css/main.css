@@ -257,6 +257,7 @@ legend { font-size: 13px; font-weight: 700; color: var(--ink-2); padding: 0 6px;
 .cal .cell.today .d { background: var(--brand); color: #fff; border-radius: 999px; width: 20px; height: 20px; display: grid; place-items: center; }
 .ev { font-size: 11.5px; border-radius: 5px; padding: 1px 5px; margin-top: 2px; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .ev.ghost { color: var(--ink-2); background: var(--line-2); }
+.ev.shared { background: repeating-linear-gradient(45deg, #1d4e89, #1d4e89 6px, #2a5f9e 6px, #2a5f9e 12px); border: 1px dashed rgba(255, 255, 255, .55); }
 
 /* ---------- 家長頁 ---------- */
 .child-card { border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }

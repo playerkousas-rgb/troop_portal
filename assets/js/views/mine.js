@@ -83,6 +83,24 @@ export function render(el) {
     body: minor ? minorFold : adultFold
   };
 
+  const layout = S.branchLayout(s.branchId);
+  const layoutFold = fold({
+    title: '支部版面（之後照抄你支部自己嘅設計）', sub: layout ? `${layout.name} · ${layout.state === 'generic' ? '未設計 → 用通用版' : '待接入'}` : '未設定',
+    body: layout ? `
+      ${notice('★ <b>旅側唔會再幫你設計支部版面</b>：各支部應該有自己嘅版面（因為各支部唔同）。之後把你支部設計好嘅版面<b>照抄</b>入嚟就可以 —— 身份、權限、分享、接駁全部唔使改，只換「畫法」。', 'info')}
+      ${kv([
+      ['版面名', esc(layout.name)],
+      ['來源', layout.from ? `<span class="mono">${esc(layout.from)}</span>` : '（未有）'],
+      ['狀態', layout.state === 'generic' ? badge('通用版面（未設計）', 'n', true) : badge('待照抄入嚟', 'y', true)],
+      ['備註', esc(layout.note || '—')]
+    ])}
+      <div class="mt-12 sm">接入方式（之後揀一個）：<br>
+        ① <b>抄</b>：把你支部嘅版面做成一個 view，旅側路由分流（<span class="mono">views/branch-&lt;支部&gt;.js</span>）；<br>
+        ② <b>掛</b>：保留你支部系統自己嘅頁面，旅側只做門戶同身份（<span class="mono">branch.layoutUrl</span>）。<br>
+        兩個做法都唔會影響：身份／職稱、權限、分享、接駁同審計。
+      </div>` : ''
+  });
+
   const body = `
   ${card({
     cls: 'pad-l',
@@ -111,6 +129,7 @@ export function render(el) {
     { k: '年齡', v: age === null ? '未填生日' : age + ' 歲' },
     { k: '通告', v: notices.length },
     { k: '待接收分享', v: S.pendingShares(s.branchId).length, tone: S.pendingShares(s.branchId).length ? 'warn' : 'ok' },
+    { k: '支部版面', v: S.branchLayout(s.branchId)?.id === 'generic' ? '通用（待接入）' : '自家版（待照抄）', hint: '各支部自己設計，旅側唔另設' },
     { k: '活動', v: events.length },
     { k: '本團物資', v: loans.length }
   ])}

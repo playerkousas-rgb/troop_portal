@@ -34,35 +34,40 @@ export const DEMO_BRANCHES = [
     youth: 18, adults: 4, founded: '2012',
     leader: '張偉業', leaderEmail: 'cheung@demo.troop',
     link: { state: 'green', purpose: 'vsbadge-troop-sig-v1', api: 'v1', localLogin: false, registeredAt: '2026-09-18', lastPing: '2026-09-25 07:40', testedAt: '2026-09-25 07:40', backend: 'script.google.com/macros/s/AKfyc…VS/exec', note: '進度 leaf 已接駁，本地入口已閂' },
-    progressSource: 'vsbadge', hasPortal: true, publicRank: 2
+    progressSource: 'vsbadge', hasPortal: true, publicRank: 2,
+    layout: { id: 'vs', name: '深資版（自家設計）', from: 'vs_portal', state: 'copy-pending', note: '支部已設計好；之後照抄入嚟（旅側唔另設）' }
   },
   {
     id: 'sc0082', code: '0082', name: '童軍團', section: '童軍', color: '#1d4e89',
     youth: 42, adults: 6, founded: '1978',
     leader: '李美儀', leaderEmail: 'lee@demo.troop',
     link: { state: 'yellow', purpose: 'scportal-troop-sig-v1', api: 'v1', localLogin: true, registeredAt: '2026-09-22', lastPing: '2026-09-24 21:10', testedAt: '2026-09-24 21:10', backend: 'script.google.com/macros/s/AKfy…SC/exec', note: '已登記，未閂本地入口（等下屬補 sig）' },
-    progressSource: 'scoutbadge', hasPortal: true, publicRank: 1
+    progressSource: 'scoutbadge', hasPortal: true, publicRank: 1,
+    layout: { id: 'scout', name: '童軍版（自家設計）', from: 'scout_portal', state: 'copy-pending', note: '支部已設計好；之後照抄入嚟' }
   },
   {
     id: 'cs0082', code: '0082', name: '幼童軍團', section: '幼童軍', color: '#b58b00',
     youth: 36, adults: 5, founded: '1985',
     leader: '黃志強', leaderEmail: 'wong@demo.troop',
     link: { state: 'green', purpose: 'cubsbadge-troop-sig-v1', api: 'v1', localLogin: false, registeredAt: '2026-09-20', lastPing: '2026-09-25 06:05', testedAt: '2026-09-25 06:05', backend: 'script.google.com/macros/s/AKfy…CS/exec', note: '已接駁（cubsbadge 零回打版，待對齊）' },
-    progressSource: 'cubsbadge', hasPortal: true, publicRank: 2
+    progressSource: 'cubsbadge', hasPortal: true, publicRank: 2,
+    layout: { id: 'cubs', name: '幼童軍版（自家設計）', from: 'cubs_portal', state: 'copy-pending', note: '照抄；要保留旅側嘅身份／分享插槽' }
   },
   {
     id: 'gs0082', code: '0082', name: '小童軍團', section: '小童軍', color: '#2e8a52',
     youth: 28, adults: 4, founded: '1996',
     leader: '陳小萍', leaderEmail: 'chan@demo.troop',
     link: { state: 'red', purpose: '', api: '', localLogin: true, registeredAt: '', lastPing: '—', testedAt: '', backend: '', note: '未接駁（該團未起支部系統）' },
-    progressSource: '', hasPortal: false, publicRank: 1
+    progressSource: '', hasPortal: false, publicRank: 1,
+    layout: { id: 'generic', name: '通用版面（未設計）', from: '', state: 'generic', note: '未有自家版面 —— 用通用版面，之後換' }
   },
   {
     id: 'rs0082', code: '0082', name: '樂行童軍團', section: '樂行童軍', color: '#a8531f',
     youth: 11, adults: 3, founded: '2019',
     leader: '何家俊', leaderEmail: 'ho@demo.troop',
     link: { state: 'green', purpose: 'roverbadge-troop-sig-v1', api: 'v1', localLogin: false, registeredAt: '2026-09-19', lastPing: '2026-09-25 07:02', backend: 'script.google.com/macros/s/AKfy…RS/exec', note: '已接駁，本地入口已閂' },
-    progressSource: 'roverbadge', hasPortal: true, publicRank: 2
+    progressSource: 'roverbadge', hasPortal: true, publicRank: 2,
+    layout: { id: 'rover', name: '樂行版（自家設計）', from: 'rover_portal', state: 'copy-pending', note: '照抄' }
   }
 ];
 
@@ -306,15 +311,16 @@ export const DEMO_INVITES = [
   { id: 'iv-3', kind: 'member', role: '副團長', email: 'newdeputy@demo.troop', token: 'TROOP-MEM-9A1C3E5G', branchId: 'cs0082', identity: '副團長', branchAccess: ['cs0082'], expires: D(0), used: true, createdBy: '陳大文', at: D(-2) + ' 10:00', usedAt: D(-1) + ' 14:30' }
 ];
 
-/** 分享（★ 收件方決定：A 團 share 去 B 團，B 團自己決定要唔要佢出現） */
+/** 分享（★ 收件方決定；只做兩樣：通告 ＋ 活動（行事曆））
+    規矩：來源支部送出 → 收件支部決定 → 接收先出現 */
 export const DEMO_SHARES = [
   { id: 'sh-1', kind: 'notice', title: '深資童軍：「黑夜行」活動通告', from: 'vs0082', to: 'sc0082', level: 2, note: '想邀請童軍團一齊行（名額 8 個）', state: 'pending', at: D(-1) + ' 20:10', by: '郭嘉敏' },
-  { id: 'sh-2', kind: 'item', title: '營幕 ×4、營燈 ×2（可外借）', from: 'vs0082', to: 'sc0082', level: 2, note: '露營用品，9 月至 11 月可借', state: 'pending', at: D(-2) + ' 17:45', by: '陳家豪' },
+  { id: 'sh-2', kind: 'event', title: '深資童軍：聯合露營（10/24-25）', from: 'vs0082', to: 'sc0082', level: 2, note: '地點：西貢；可以一齊報名', date: D(29), time: '14:00', place: '西貢戶外訓練營', state: 'pending', at: D(-2) + ' 17:45', by: '陳家豪' },
   { id: 'sh-3', kind: 'notice', title: '旅團服務日：沙田公園清潔', from: 'troop', to: 'all', level: 0, state: 'accepted', at: D(-4) + ' 09:00', by: '陳大文', decidedBy: '系統（旅層等級 0 = 自動）', decidedAt: D(-4) + ' 09:00' },
-  { id: 'sh-4', kind: 'event', title: '2026 旅露營（全旅）', from: 'troop', to: 'all', level: 2, state: 'accepted', at: D(-6) + ' 14:20', by: '陳大文', decidedBy: '李美儀', decidedAt: D(-6) + ' 15:00' },
-  { id: 'sh-5', kind: 'item', title: '童軍棍 ×40（可外借）', from: 'sc0082', to: 'cs0082', level: 2, state: 'accepted', at: D(-8) + ' 11:00', by: '陳家欣', decidedBy: '鄭美玲', decidedAt: D(-7) + ' 09:30' },
-  { id: 'sh-6', kind: 'album', title: '小隊露營相簿（2026 夏）', from: 'sc0082', to: 'vs0082', level: 2, state: 'declined', at: D(-9) + ' 16:00', by: '陳家欣', decidedBy: '郭嘉敏', decidedAt: D(-8) + ' 12:10', decideNote: '相內有未成年成員，未收齊家長同意 → 暫不接收' },
-  { id: 'sh-7', kind: 'progress', title: '深資童軍專科章成果（2026 Q3）', from: 'vs0082', to: 'all', level: 3, state: 'pending', at: D(-1) + ' 21:30', by: '郭嘉敏', note: '想收錄入旅公開資料（要旅長批）' }
+  { id: 'sh-4', kind: 'event', title: '2026 旅露營（全旅）', from: 'troop', to: 'all', level: 2, date: D(21), time: '09:00', place: '西貢戶外訓練營', state: 'accepted', at: D(-6) + ' 14:20', by: '陳大文', decidedBy: '李美儀', decidedAt: D(-6) + ' 15:00' },
+  { id: 'sh-5', kind: 'event', title: '童軍：小隊訓練（公開觀摩）', from: 'sc0082', to: 'cs0082', level: 3, date: D(3), time: '14:00', place: '旅部', state: 'accepted', at: D(-8) + ' 11:00', by: '陳家欣', decidedBy: '鄭美玲', decidedAt: D(-7) + ' 09:30' },
+  { id: 'sh-6', kind: 'event', title: '童軍：小隊露營（要有家長同意）', from: 'sc0082', to: 'vs0082', level: 3, date: D(17), time: '09:00', place: '大埔', state: 'declined', at: D(-9) + ' 16:00', by: '陳家欣', decidedBy: '郭嘉敏', decidedAt: D(-8) + ' 12:10', decideNote: '該團未收齊家長同意 → 暫不接收' },
+  { id: 'sh-7', kind: 'notice', title: '深資童軍：專科章成果展示日', from: 'vs0082', to: 'all', level: 3, state: 'pending', at: D(-1) + ' 21:30', by: '郭嘉敏', note: '想全旅都知（由旅長決定收唔收）' }
 ];
 
 /** 模組開關（TROOP_MODULES：模組 × 全旅／指定支部） */

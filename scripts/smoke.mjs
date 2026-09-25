@@ -294,6 +294,24 @@ await test('分享：未接收＝唔會出現喺通告；接收＝出現並標�
   assert(t.includes('來自') && t.includes('深資童軍團'), '冇標明來源');
 });
 
+await test('分享：只做兩樣（通告／活動）＋ 活動分享落喺行事曆格', async () => {
+  assert(R.SHARE_KINDS.map(k => k.id).join(',') === 'notice,event', '分享種類唔止兩樣');
+  A.loginAs('u-m-minor');
+  main.boot();
+  fireHash(w, '#/shares');
+  const opts = [...document.getElementById('view').querySelectorAll('#sh-new ~ * option')];
+  assert(!document.getElementById('view').textContent.includes('相簿'), '仲有相簿之類嘅種類');
+
+  /* 已接收嘅活動分享（sh-5 童軍 → 幼童軍）要落喺行事曆 */
+  A.loginAs('u-b-leader');
+  main.boot();
+  fireHash(w, '#/calendar');
+  const cal = document.getElementById('view');
+  assert(cal.textContent.includes('來自 童軍團'), '行事曆冇標明分享來源');
+  assert(cal.querySelector('.ev.shared'), '行事曆格冇分享活動');
+  assert(cal.textContent.includes('接收咗'), '行事曆冇講明要接收咗先出現');
+});
+
 await test('分享：退回要留紀錄（邊個決定、理由）', async () => {
   A.loginAs('u-m-minor');
   main.boot();
@@ -331,7 +349,7 @@ await test('分享：物主／團長可以撤回未接收嘅分享', async () =>
   A.loginAs('u-b-leader');           // 幼童軍團長（收到童軍團 sh-5 已接收）
   main.boot();
   fireHash(w, '#/shares?tab=accepted');
-  assert(document.getElementById('view').textContent.includes('童軍棍'), '已接收清單唔見 sh-5');
+  assert(document.getElementById('view').textContent.includes('小隊訓練'), '已接收清單唔見 sh-5');
   A.loginAs('u-m-exec');             // 深資執委（物主）撤回自己發出嘅
   main.boot();
   fireHash(w, '#/shares?tab=sent');
@@ -339,6 +357,20 @@ await test('分享：物主／團長可以撤回未接收嘅分享', async () =>
   assert(btn, '物主冇撤回掣');
   btn.click();
   assert(S.shares().find(x => x.id === 'sh-7').state === 'withdrawn', '撤回冇寫入');
+});
+
+await test('★ 支部版面：旅側唔另設，各支部自家版面之後照抄（有接入位）', async () => {
+  const d = S.load();
+  for (const b of d.branches) assert(b.layout && b.layout.id, `${b.id} 冇版面欄`);
+  const vs = d.branches.find(b => b.id === 'vs0082');
+  assert(vs.layout.state === 'copy-pending', '深資版狀態唔啱');
+  assert(d.branches.find(b => b.id === 'gs0082').layout.state === 'generic', '未設計嘅支部應該係通用版面');
+  A.loginAs('u-m-minor');
+  main.boot();
+  fireHash(w, '#/mine');
+  const t = document.getElementById('view').textContent;
+  assert(t.includes('版面'), '支部人員睇唔到自己支部嘅版面狀態');
+  assert(t.includes('之後照抄') || t.includes('自家'), '冇講明版面之後照抄');
 });
 
 await test('★ 旅入口＝支部入口：支部人員由旅閘登入即入自己支部（冇第二次登入）', async () => {

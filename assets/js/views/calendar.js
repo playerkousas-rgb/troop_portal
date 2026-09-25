@@ -14,9 +14,12 @@ export function render(el, params, query = {}) {
   /* ★ 已接收嘅活動分享（收件方接收咗先會出現） */
   const sharedEv = S.acceptedShares(S.myBranchId(), 'event').filter(x => x.from !== S.myBranchId());
   const sharedRows = sharedEv.map(x => ({
-    date: x.at.slice(0, 10), title: `【來自 ${S.branchName(x.from)}】${x.title}`,
-    cal: x.from, time: '', place: ''
+    date: x.date || x.at.slice(0, 10), title: x.title,
+    cal: x.from, time: x.time || '', place: x.place || '', shared: true
   }));
+  /* 分享活動要落喺活動本身嘅日期；示範資料冇逐條日期就用發出日 */
+  const sharedOn = (date) => sharedRows.filter(r => r.date === date);
+  const monthShared = sharedRows.filter(r => r.date.startsWith(month)).length;
   const [y, mm] = month.split('-').map(Number);
   const first = new Date(y, mm - 1, 1);
   const startDow = first.getDay();
@@ -47,18 +50,20 @@ export function render(el, params, query = {}) {
         ${cells.map(c => `<div class="cell ${c.out ? 'out' : ''} ${c.date === todayISO() ? 'today' : ''}">
           <div class="d">${parseISO(c.date)?.getDate()}</div>
           ${events.filter(e => e.date === c.date).map(e => `<div class="ev" style="background:${e.color}" data-ev="${e.id}" title="${esc(e.title)}">${esc(e.title)}</div>`).join('')}
+          ${sharedOn(c.date).map(x => `<div class="ev shared" title="${esc(x.title)}（來自 ${esc(S.branchName(x.cal))}）">${icon('share', 10)} ${esc(x.title)}</div>`).join('')}
         </div>`).join('')}
       </div>
     </div>
-    <div class="xs faint mt-8">每支部一個日曆、各自一色；用戶可勾選／按標籤 FILTER。成員／家長只睇得到自己支部＋旅。</div>
+    <div class="xs faint mt-8">每支部一個日曆、各自一色；用戶可勾選／按標籤 FILTER。成員／家長只睇得到自己支部＋旅。
+      ${sharedEv.length ? `<br><span class="ev shared" style="display:inline-block">${icon('share', 10)} 分享</span> ＝ 其他支部 share 咗、你哋<b>接收咗</b>嘅活動（唔會混入你自己支部嘅顏色）。` : ''}</div>
   ` })}
   <div class="grid g2 mt-12">
-    ${card({ title: `本月活動（${events.filter(e => e.date.startsWith(month)).length} 項)`, body: table({
+    ${card({ title: `本月活動（${events.filter(e => e.date.startsWith(month)).length} 項${monthShared ? ` ＋ ${monthShared} 項分享` : ''}）`, body: table({
       cls: 'tbl compact', head: ['日期', '活動', '日曆', '時間', '地點'],
       rows: events.filter(e => e.date.startsWith(month)).sort((a, b) => a.date.localeCompare(b.date)).map(e => ({
         cells: [esc(fmtDate(e.date, true)), esc(e.title), `<span class="swatch" style="background:${e.color}"></span> ${esc(S.branchName(e.cal))}`, esc(e.time || ''), esc(e.place || '')]
       })).concat(sharedRows.map(x => ({
-        cells: [esc(fmtDate(x.date, true)), esc(x.title), `<span class="tag b sm">分享</span> ${esc(S.branchName(x.cal))}`, '—', '—']
+        cells: [esc(fmtDate(x.date, true)), esc(x.title) + '<span class="tag b sm" style="margin-left:6px">分享</span>', `<span class="tag b sm">來自 ${esc(S.branchName(x.cal))}</span>`, esc(x.time || '—'), esc(x.place || '—')]
       }))), empty: '本月冇活動'
     }) })}
     ${card({ title: '標籤過濾', sub: '事件帶支部自訂標籤', body: `
@@ -66,7 +71,11 @@ export function render(el, params, query = {}) {
       <div class="mt-12">${notice('旅日曆同支部日曆係<b>兩層</b>：支部自己出嘅活動留喺支部；旅只放旅層活動（旅露營、旅務會議、聯合服務）。★ 其他支部嘅活動要<b>你哋接收咗分享</b>先會出現（標明「來自 XX 團」）。', 'info')}</div>` })}
   </div>
   `;
-  el.innerHTML = page({ title: '行事曆', sub: `${d.branches.length + 1} 個日曆 · 本月 ${events.filter(e => e.date.startsWith(month)).length} 項活動`, body });
+  el.innerHTML = page({
+    title: '行事曆',
+    sub: `${d.branches.length + 1} 個日曆 · 本月 ${events.filter(e => e.date.startsWith(month)).length} 項活動${monthShared ? ` ＋ ${monthShared} 項分享` : ''}`,
+    body
+  });
 
   el.querySelectorAll('[data-m]').forEach(b => b.addEventListener('click', () => setQuery({ m: b.dataset.m, on: on.join(',') })));
   el.querySelectorAll('[data-cal]').forEach(c => c.addEventListener('click', () => {

@@ -119,6 +119,8 @@ export const visibleUsers = () => users().filter(u => !u.hidden);
 /** 支部人員（團長／副團長／成員）嘅所屬支部 */
 export const myBranchId = () => session?.branchId || null;
 export const myBranch = () => (session?.branchId ? branchById(session.branchId) : null);
+/** ★ 支部版面：各支部自家設計，之後照抄入嚟（旅側唔另設一套） */
+export const branchLayout = id => (id === 'troop' ? null : (branchById(id)?.layout || null));
 export const myIdentity = () => session?.identity || null;
 export const myTitle = () => session?.title || null;
 export const myMember = () => (session?.ymis ? memberByYmis(session.ymis) : null);
@@ -203,7 +205,7 @@ export const pendingShares = (branchId = myBranchId()) => sharesToMe(branchId).f
 /** 已接收（＝真係會出現喺我清單） */
 export const acceptedShares = (branchId = myBranchId(), kind = null) =>
   sharesToMe(branchId).filter(s => s.state === 'accepted' && (!kind || s.kind === kind));
-export const KIND_LABEL = { notice: '通告', event: '活動', item: '物資', progress: '進度／成果', album: '相簿', doc: '教材' };
+export const KIND_LABEL = { notice: '通告', event: '活動', item: '物資（舊）', progress: '進度／成果（舊）', album: '相簿（舊）', doc: '教材（舊）' };
 export function decideShare(id, state, note = '') {
   const u = currentUser();
   return commit(d => {

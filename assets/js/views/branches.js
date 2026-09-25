@@ -100,7 +100,8 @@ export function renderDetail(el, { id }, query = {}) {
       ['團長', `${esc(b.leader)}（${esc(b.leaderEmail)}）`],
       ['旅內顯示名', esc(b.name)],
       ['進度來源', b.progressSource ? `<span class="mono">${esc(b.progressSource)}</span>` : '未接'],
-      ['公開資料等級', `${visName(b.publicRank)}（${b.publicRank}）`]
+      ['公開資料等級', `${visName(b.publicRank)}（${b.publicRank}）`],
+      ['支部版面', b.layout ? `${esc(b.layout.name)} <span class="tag ${b.layout.state === 'generic' ? 'n' : 'y'} sm">${b.layout.state === 'generic' ? '通用（未設計）' : '待照抄'}</span>` : '未設定']
     ]) })}
       ${card({ title: '健康狀態', body: `
         ${notice(b.link.state === 'green' ? '接駁正常：可以用 sig 讀寫，本地入口已閂（只收上游簽名）。'
@@ -122,7 +123,8 @@ export function renderDetail(el, { id }, query = {}) {
           { cells: ['進度 leaf', b.progressSource ? `<span class="tag g">已接駁（${esc(b.progressSource)}）</span>` : '<span class="tag n">未接</span>'] },
           { cells: ['本地直接入口', b.link.state === 'red' ? '<span class="tag n">—</span>' : b.link.localLogin ? '<span class="tag y">開啟</span>' : '<span class="tag g">已閂（只收 sig）</span>'] },
           { cells: ['財務提交（2026-09）', fin ? `<span class="tag ${fin.state === 'accepted' ? 'g' : 'y'}">${esc(fin.state)}</span>` : '<span class="tag n">—</span>'] },
-          { cells: ['公開資料', `${visName(b.publicRank)}`] }
+          { cells: ['公開資料', `${visName(b.publicRank)}`] },
+          { cells: ['支部版面', b.layout ? (b.layout.state === 'generic' ? '<span class="tag n">通用（未設計）</span>' : `<span class="tag y">${esc(b.layout.name)}</span><div class="xs faint">之後照抄（旅側唔另設）</div>`) : '—'] }
         ]
       }) })}
     `;
@@ -136,6 +138,7 @@ export function renderDetail(el, { id }, query = {}) {
       ${stat({ k: '已接收', v: inb.filter(x => x.state === 'accepted').length, u: '項', tone: 'ok' })}
       ${stat({ k: '呢個支部發出', v: out.length, u: '項' })}
     </div>
+    ${notice('分享只做兩樣：<b>通告</b>（通告頁）同<b>活動</b>（行事曆）。接收咗先會出現喺該支部自己嘅清單。', 'info')}
     ${card({ title: '收到嘅分享', body: table({
       cls: 'tbl compact', head: ['內容', '來自', '等級', '狀態', '邊個決定'],
       rows: inb.map(x => ({

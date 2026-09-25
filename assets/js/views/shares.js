@@ -12,7 +12,7 @@ import { esc, icon, toast } from '../lib/util.js';
 import * as S from '../lib/store.js';
 import { go } from '../lib/router.js';
 import { page, card, table, badge, notice, tabs, modal, kv, fold } from './ui.js';
-import { can, visName, visClass, canDecideShare } from '../lib/registry.js';
+import { can, visName, visClass, canDecideShare, SHARE_KINDS } from '../lib/registry.js';
 
 export function render(el, params, query = {}) {
   const tab = query.tab || 'inbox';
@@ -33,7 +33,7 @@ export function render(el, params, query = {}) {
     ['rules', '分享規矩']
   ], tab);
 
-  const kindTag = k => badge(S.KIND_LABEL[k] || k, { notice: 'b', event: 'g', item: 'gold', progress: 'n', album: 'n', doc: 'n' }[k] || 'n', true);
+  const kindTag = k => badge(S.KIND_LABEL[k] || k, { notice: 'b', event: 'g' }[k] || 'n', true);
   const stateTag = st => ({
     pending: badge('待你哋決定', 'y', true),
     accepted: badge('已接收', 'g', true),
@@ -46,9 +46,9 @@ export function render(el, params, query = {}) {
       `${esc(S.branchName(x.from))} → ${x.to === 'all' ? '<span class="tag gold sm">全旅</span>' : esc(S.branchName(x.to))}`,
       `<span class="tag n sm ${visClass(x.level)}">${esc(visName(x.level))}</span>`,
       `<span class="xs">${esc(x.by || '')}<br><span class="faint">${esc(x.at || '')}</span></span>`,
-      x.state === 'pending' && x.to !== 'all' && canDecide
+      x.state === 'pending' && canDecide && (x.to !== 'all' || isTroop)
         ? `<div class="btn-row"><button class="btn xs primary" data-ok="${x.id}">接收（畀佢出現）</button><button class="btn xs" data-no="${x.id}">退回</button></div>`
-        : `${stateTag(x.state)}${x.suggest ? `<div class="xs">${esc(x.suggest.by)} 建議：${esc(x.suggest.text)}</div>` : ''}${x.decidedBy ? `<div class="xs faint">${esc(x.decidedBy)} · ${esc(x.decidedAt || '')}</div>` : ''}${x.state === 'pending' && !canDecide ? `<button class="btn xs mt-8" data-note="${x.id}">加註解交團長／執委</button>` : ''}`
+        : `${stateTag(x.state)}${x.suggest ? `<div class="xs">${esc(x.suggest.by)} 建議：${esc(x.suggest.text)}</div>` : ''}${x.decidedBy ? `<div class="xs faint">${esc(x.decidedBy)} · ${esc(x.decidedAt || '')}</div>` : ''}${x.state === 'pending' && !canDecide ? `<button class="btn xs mt-8" data-note="${x.id}">加註解交團長／執委</button>` : ''}${x.state === 'pending' && x.to === 'all' && !isTroop ? `<div class="xs faint">全旅分享：由旅長決定</div>` : ''}`
     ]
   });
 
@@ -77,12 +77,10 @@ export function render(el, params, query = {}) {
       })
     })}
     ${fold({
-      title: '接收之後，喺邊度見到？', sub: '四種去处', body: table({
-        cls: 'tbl compact', head: ['種類', '接收後出現喺'], rows: [
-          { cells: ['通告', '通告（來源標明「來自 XX 團」）'] },
-          { cells: ['活動', '行事曆（唔會混入你團自己嘅活動顏色）'] },
-          { cells: ['物資', '物資整合（可以申請借用；批核仍然係物主）'] },
-          { cells: ['進度／成果', '本團進度摘要；旅公開要旅長另外批'] }
+      title: '接收之後，喺邊度見到？', sub: '只有兩樣（你定嘅範圍）', body: table({
+        cls: 'tbl compact', head: ['種類', '接收後出現喺', '備註'], rows: [
+          { cells: ['通告', '通告頁', '每項標明「來自 XX 團」，同自己團嘅通告同一版但分開一組'] },
+          { cells: ['活動', '行事曆（月曆格 ＋ 本月活動）', '用「分享」樣式，唔會混入你自己支部嘅顏色'] }
         ]
       })
     })}
@@ -100,7 +98,7 @@ export function render(el, params, query = {}) {
       }),
       actions: (isTroop || canDecide) ? `<button class="btn sm primary" id="sh-new">${icon('plus', 13)} 發起分享</button>` : ''
     })}
-    ${notice('分享係<b>一對一</b>（或全旅）嘅：例如你係深資決定 share 去童軍，童軍收唔收就係童軍決定 —— 唔會自動彈去所有支部。', 'info')}
+    ${notice('分享係<b>一對一</b>（或全旅）嘅：例如你係深資決定 share 去童軍，童軍收唔收就係童軍決定 —— 唔會自動彈去所有支部。<br>★ 目前只做兩樣：<b>通告</b>同<b>活動（行事曆）</b>；物資／進度／相簿等之後先加。', 'info')}
     `;
   } else {
     body = `
@@ -109,7 +107,7 @@ export function render(el, params, query = {}) {
         cls: 'tbl compact', head: ['步驟', '邊個做', '做咩'], rows: [
           { cells: ['1 發出', '物主支部（執委或以上）', '揀種類、內容、目標支部、可見等級 → 送出'] },
           { cells: ['2 接收', '<b>收件支部</b>（執委或以上／團長）', '接收＝先會出現；退回＝留紀錄（記理由）'] },
-          { cells: ['3 出現', '系統', '混入接收方清單，每項標明「來自 XX 團」'] },
+          { cells: ['3 出現', '系統', '混入接收方清單（<b>通告頁</b>／<b>行事曆</b>），每項標明「來自 XX 團」'] },
           { cells: ['4 收回', '收件支部 或 物主', '任何時間可以收回；收回即刻唔再出現'] },
           { cells: ['旅公開', '旅長', '要對外（免登入）嘅，另外上報旅長批'] }
         ]
@@ -121,7 +119,8 @@ export function render(el, params, query = {}) {
         <li><b>唔會自動出現</b>：未接收嘅分享只喺「分享中心 · 待接收」。</li>
         <li><b>唔會靜靜地消失</b>：退回都會留紀錄（邊個決定、幾時、理由）。</li>
         <li><b>撤回權留返物主</b>：物主可以撤回未接收嘅分享。</li>
-        <li><b>未夠決定權</b>：成員／青少年領袖見到「待接收」，可以加註解交團長／執委決定。</li>
+        <li><b>未夠決定權</b>：成員／青少年領袖見到「待接收」，可以加註解交團長／執委決定（唔等於決定）。</li>
+        <li><b>只做兩樣</b>：通告（通告頁）同活動（行事曆）；其他種類 UI 唔開，但資料欄已經留住。</li>
       </ul>` })}
     `;
   }
@@ -181,12 +180,12 @@ export function render(el, params, query = {}) {
   el.querySelectorAll('[data-revoke]').forEach(b => b.addEventListener('click', () => doDecide(b.dataset.revoke, 'withdrawn')));
   el.querySelectorAll('[data-pull]').forEach(b => b.addEventListener('click', () => doDecide(b.dataset.pull, 'withdrawn')));
 
-  el.querySelector('#sh-new')?.addEventListener('click', () => {
+  el.querySelector('#sh-new')?.addEventListener('click', () => {   // 種類：通告／活動（行事曆）兩樣
     const targets = S.myBranches().filter(b => b.id !== myBid);
     const m = modal({
       title: '發起分享', body: `
       <div class="xs faint mb-12">發出之後：<b>對方接收先會出現</b>；對方可以退回（會通知你）。</div>
-      <label class="f"><span class="lb">種類</span><select id="sh-kind">${Object.entries(S.KIND_LABEL).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select></label>
+      <label class="f"><span class="lb">種類</span><select id="sh-kind">${SHARE_KINDS.map(k => `<option value="${k.id}">${esc(k.label)} → 出現喺${esc(k.to)}</option>`).join('')}</select></label>
       <label class="f"><span class="lb">內容</span><input type="text" id="sh-title" placeholder="例：營幕 ×4（可外借）"></label>
       <div class="grid g2">
         <label class="f"><span class="lb">去邊個支部</span><select id="sh-to"><option value="all">全旅（所有支部）</option>${targets.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select></label>
