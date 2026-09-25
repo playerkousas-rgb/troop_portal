@@ -60,7 +60,10 @@ export function render(el, params, query = {}) {
             ${u.role === 'member'
       ? `<button class="btn xs" data-ident="${u.id}">身份／職稱</button><button class="btn xs" data-perms="${u.id}">權限微調</button>`
       : `<button class="btn xs" data-access="${u.id}">支部權限</button>`}
-            ${u.status === 'disabled' ? `<button class="btn xs" data-enable="${u.id}">復原</button>` : (u.role === 'chief' ? '<span class="faint xs">旅長唔可以停用</span>' : `<button class="btn xs danger" data-disable="${u.id}">停用</button>`)}
+            ${u.status === 'disabled' ? `<button class="btn xs" data-enable="${u.id}">復原</button>` : (S.removalGuard(u).ok
+      ? `<button class="btn xs danger" data-disable="${u.id}">停用</button>`
+      : `<span class="faint xs" title="${esc(S.removalGuard(u).msg)}">最後一個領袖戶</span>`)}
+            <button class="btn xs danger" data-remove="${u.id}">刪除</button>
           </div>`
         ]
       })),
@@ -220,17 +223,38 @@ export function render(el, params, query = {}) {
   el.querySelectorAll('[data-disable]').forEach(b => b.addEventListener('click', async () => {
     const { confirmDlg } = await import('../lib/util.js');
     const u = S.userById(b.dataset.disable);
-    if (await confirmDlg({ title: `停用 ${u.name}`, message: '會即刻撤銷權限；如佢有管理權，記得同時 rotate key。', ok: '停用', danger: true })) {
-      S.commit(dd => { const t = dd.users.find(x => x.id === u.id); if (t) t.status = 'disabled'; });
-      S.audit('停用帳號', u.name, '');
+    const g = S.removalGuard(u);
+    if (!g.ok) { toast(g.msg, 'err', '', null, 7000); return; }        // 誠實失敗：唔會扮成功
+    if (await confirmDlg({ title: `停用 ${u.name}`, message: `會即刻撤銷權限；如佢有管理權，記得同時 rotate key。<div class="xs faint mt-8">帳號下限：${esc(g.leaf)} 停用之後仲有 <b>${g.rest}</b> 個領袖戶。</div>`, ok: '停用', danger: true })) {
+      const r = S.setUserStatus(u.id, 'disabled');
+      if (!r.ok) { toast(r.msg, 'err', '', null, 7000); return; }
+      S.audit('停用帳號', u.name, `${g.leaf} 仲有 ${g.rest} 個領袖戶`);
       toast('已停用', 'warn'); go('users?tab=list');
     }
   }));
   el.querySelectorAll('[data-enable]').forEach(b => b.addEventListener('click', () => {
     const u = S.userById(b.dataset.enable);
-    S.commit(dd => { const t = dd.users.find(x => x.id === u.id); if (t) t.status = 'active'; });
+    const r = S.setUserStatus(u.id, 'active');
+    if (!r.ok) { toast(r.msg, 'err'); return; }
     S.audit('復原帳號', u.name, '');
     toast('已復原', 'ok'); go('users?tab=list');
+  }));
+  /* ★ 刪除帳號：同一個下限守衛（BUILD §2「每個 leaf 至少留一個領袖戶」） */
+  el.querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', async () => {
+    const { confirmDlg } = await import('../lib/util.js');
+    const u = S.userById(b.dataset.remove);
+    const g = S.removalGuard(u);
+    if (!g.ok) { toast(g.msg, 'err', '', null, 7000); return; }
+    const ok = await confirmDlg({
+      title: `刪除 ${u.name}？`,
+      message: `會由帳號名單移除（入「已移除」紀錄：邊個、幾時、邊個做）。<div class="xs faint mt-8">帳號下限：${esc(g.leaf)} 刪除之後仲有 <b>${g.rest}</b> 個領袖戶 —— 唔會刪到冇人入得返。</div>`,
+      ok: '刪除', danger: true, requireTyping: '刪除'
+    });
+    if (!ok) return;
+    const r = S.removeUserAccount(u.id);
+    if (!r.ok) { toast(r.msg, 'err', '', null, 7000); return; }
+    S.audit('刪除帳號', `${u.name}（${u.email}）`, `${g.leaf} 仲有 ${g.rest} 個領袖戶`);
+    toast('已刪除帳號（紀錄留住）', 'warn'); go('users?tab=list');
   }));
 }
 

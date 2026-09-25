@@ -154,6 +154,69 @@ export const branchGate = branchId => {
   return b ? gateOfLink(b.link) : 'open';
 };
 
+/* ---------------- ★ 帳號下限：每個 leaf 至少留 1 個領袖戶（BUILD §2） ----------------
+   用戶 2026-09-25 澄清：「呢個係指 DELETE ACCOUNT，要保留最小 1 個」。
+   即係：刪／停用帳號之前，要確保嗰個 leaf 仲有領袖戶入得返 —— 唔可以刪到冇人。
+   呢條規矩同「閂咗分支系統登入之後本地戶一樣 403」冇衝突：
+   一個係「有冇戶口」，一個係「本地登入通唔通」。 */
+export const BRANCH_LEADER_IDENTITIES = ['團長', '副團長'];
+const isBranchLeaderUser = u => u?.role === 'member' && BRANCH_LEADER_IDENTITIES.includes(u.identity);
+
+/** 該 leaf 仲有幾多個啟用中領袖戶（唔計自己） */
+export function otherLeaders(u) {
+  if (!u) return [];
+  if (u.role === 'chief') return load().users.filter(x => x.role === 'chief' && x.status === 'active' && x.id !== u.id);
+  if (u.role === 'member') return load().users.filter(x => x.role === 'member' && x.branchId === u.branchId && x.status === 'active' && x.id !== u.id && isBranchLeaderUser(x));
+  return [];
+}
+
+/** 刪／停用之前一定要過呢度 */
+export function removalGuard(u) {
+  if (!u) return { ok: false, msg: '搵唔到帳號' };
+  if (u.role === 'super' || u.hidden) return { ok: false, msg: '平台超管（隱藏）唔可以停用／刪除 —— 佢係最後一道（第二層備援）' };
+  if (u.role === 'chief') {
+    if (!otherLeaders(u).length) return { ok: false, msg: '旅長係旅 SHEET 最後一個領袖戶 —— 要先開多一個旅長，先可以停用／刪除', leaf: '旅 SHEET' };
+    return { ok: true, leaf: '旅 SHEET', rest: otherLeaders(u).length };
+  }
+  if (isBranchLeaderUser(u)) {
+    const rest = otherLeaders(u);
+    if (!rest.length) return { ok: false, msg: `「${branchName(u.branchId)}」得呢一個領袖戶（${u.identity}）—— 要先開多一個團長／副團長，先可以停用／刪除`, leaf: branchName(u.branchId), rest: 0 };
+    return { ok: true, leaf: branchName(u.branchId), rest: rest.length };
+  }
+  return { ok: true, leaf: u.role === 'member' ? branchName(u.branchId) : '旅 SHEET', rest: otherLeaders(u).length };
+}
+
+/** 停用／復原（停用要過下限守衛） */
+export function setUserStatus(userId, status) {
+  const u = userById(userId);
+  if (!u) return { ok: false, msg: '搵唔到帳號' };
+  if (status !== 'active') {
+    const g = removalGuard(u);
+    if (!g.ok) return g;
+  }
+  const at = nowStr();
+  commit(d => {
+    const t = d.users.find(x => x.id === userId);
+    if (t) { t.status = status; t.statusAt = at; t.statusBy = currentUser()?.name || ''; }
+  }, { markDirty: true });
+  return { ok: true, at, u };
+}
+
+/** 刪除帳號（同一個下限守衛；唔可以刪到某個 leaf 冇領袖戶） */
+export function removeUserAccount(userId) {
+  const u = userById(userId);
+  if (!u) return { ok: false, msg: '搵唔到帳號' };
+  const g = removalGuard(u);
+  if (!g.ok) return g;
+  const at = nowStr();
+  commit(d => {
+    d.users = d.users.filter(x => x.id !== userId);
+    d.removedUsers = d.removedUsers || [];
+    d.removedUsers.unshift({ id: u.id, name: u.name, email: u.email, role: u.role, branchId: u.branchId || '', identity: u.identity || '', at, by: currentUser()?.name || '' });
+  }, { markDirty: true });
+  return { ok: true, at, u, leaf: g.leaf };
+}
+
 /* ---------------- ★ 求救制（取代逃生門；用戶定案 2026-09-25） ----------------
    求救＝**請求**：送得出去、睇得到、有人跟 —— 但唔會自動開任何嘢。
    處理（開返閘／重設密碼／答覆）全部由 ADMIN 人手做，逐單留紀錄。 */

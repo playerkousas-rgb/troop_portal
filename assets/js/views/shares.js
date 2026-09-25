@@ -12,7 +12,7 @@ import { esc, icon, toast } from '../lib/util.js';
 import * as S from '../lib/store.js';
 import { go } from '../lib/router.js';
 import { page, card, table, badge, notice, tabs, modal, kv, fold } from './ui.js';
-import { can, visName, visClass, canDecideShare, SHARE_KINDS } from '../lib/registry.js';
+import { can, visName, visClass, canDecideShare, shareableTargets, SHARE_KINDS } from '../lib/registry.js';
 
 export function render(el, params, query = {}) {
   const tab = query.tab || 'inbox';
@@ -121,6 +121,8 @@ export function render(el, params, query = {}) {
         <li><b>撤回權留返物主</b>：物主可以撤回未接收嘅分享。</li>
         <li><b>未夠決定權</b>：成員／青少年領袖見到「待接收」，可以加註解交團長／執委決定（唔等於決定）。</li>
         <li><b>只做兩樣</b>：通告（通告頁）同活動（行事曆）；其他種類 UI 唔開，但資料欄已經留住。</li>
+        <li><b>發方揀對象、收方決定</b>（用戶原話：<i>「係我發你可以唔收，我想深資活動想童軍支部參與姐，我童軍團領袖唔想比仔參與唔得咩？」</i>）——
+          你可以一次揀幾個支部發出；每個收件支部獨立決定收／退。<b>收件方唔想，就唔會出現喺佢哋清單</b>，你亦唔會硬塞到佢哋度。</li>
       </ul>` })}
     `;
   }
@@ -181,16 +183,21 @@ export function render(el, params, query = {}) {
   el.querySelectorAll('[data-pull]').forEach(b => b.addEventListener('click', () => doDecide(b.dataset.pull, 'withdrawn')));
 
   el.querySelector('#sh-new')?.addEventListener('click', () => {   // 種類：通告／活動（行事曆）兩樣
-    const targets = S.myBranches().filter(b => b.id !== myBid);
+    /* 發方揀對象：用註冊表過濾（接收方要有該模組先分享得到），唔受「我睇得到邊幾個團」限制 */
+    const targets = shareableTargets(S.load(), 'notices', myBid || '').concat(
+      shareableTargets(S.load(), 'calendar', myBid || '').filter(b => !shareableTargets(S.load(), 'notices', myBid || '').some(x => x.id === b.id)));
     const m = modal({
       title: '發起分享', body: `
       <div class="xs faint mb-12">發出之後：<b>對方接收先會出現</b>；對方可以退回（會通知你）。</div>
       <label class="f"><span class="lb">種類</span><select id="sh-kind">${SHARE_KINDS.map(k => `<option value="${k.id}">${esc(k.label)} → 出現喺${esc(k.to)}</option>`).join('')}</select></label>
       <label class="f"><span class="lb">內容</span><input type="text" id="sh-title" placeholder="例：營幕 ×4（可外借）"></label>
-      <div class="grid g2">
-        <label class="f"><span class="lb">去邊個支部</span><select id="sh-to"><option value="all">全旅（所有支部）</option>${targets.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select></label>
-        <label class="f"><span class="lb">可見等級</span><select id="sh-level">${[0, 1, 2, 3, 4].map(n => `<option value="${n}" ${n === 2 ? 'selected' : ''}>${n} · ${esc(visName(n))}</option>`).join('')}</select></label>
-      </div>
+      <label class="f"><span class="lb">去邊個支部（可以揀多過一個）</span>
+        <div class="mt-8">
+          <label class="check"><input type="checkbox" data-sh-all> <b>全旅</b>（所有支部）</label>
+          ${targets.map(b => `<label class="check"><input type="checkbox" data-sh-to="${b.id}"> ${esc(b.name)}</label>`).join('')}
+        </div>
+        <div class="hint">你揀對象發出去；<b>對方決定收唔收</b>（可以退回，會通知你）。例：深資團有個活動想請童軍團一齊 → 深資揀「童軍團」發出；童軍團領袖唔想小朋友參與 → 佢退回就得，唔會出現喺佢哋清單。</div></label>
+      <label class="f"><span class="lb">可見等級</span><select id="sh-level">${[0, 1, 2, 3, 4].map(n => `<option value="${n}" ${n === 2 ? 'selected' : ''}>${n} · ${esc(visName(n))}</option>`).join('')}</select></label>
       <label class="f"><span class="lb">備註（對方會見到）</span><input type="text" id="sh-note" placeholder="例：想邀請一齊行／9 至 11 月可借"></label>`,
       footer: `<button class="btn" data-close>取消</button><button class="btn primary" data-save>送出分享</button>`
     });
@@ -198,13 +205,18 @@ export function render(el, params, query = {}) {
     m.el.querySelector('[data-save]').onclick = () => {
       const title = m.el.querySelector('#sh-title').value.trim();
       if (!title) return toast('要填內容', 'err');
-      S.addShare({
-        kind: m.el.querySelector('#sh-kind').value, title,
-        from: myBid || 'troop', to: m.el.querySelector('#sh-to').value,
-        level: Number(m.el.querySelector('#sh-level').value), note: m.el.querySelector('#sh-note').value.trim()
-      });
-      S.audit('發出分享', title, `去 ${S.branchName(m.el.querySelector('#sh-to').value)}`);
-      m.close(); toast('已送出 —— 等對方接收', 'ok'); go('shares?tab=sent');
+      const all = m.el.querySelector('[data-sh-all]').checked;
+      const picks = [...m.el.querySelectorAll('[data-sh-to]')].filter(x => x.checked).map(x => x.dataset.shTo);
+      const targets = all ? ['all'] : picks;
+      if (!targets.length) return toast('要揀至少一個支部（或者全旅）', 'err');
+      const kind = m.el.querySelector('#sh-kind').value;
+      const level = Number(m.el.querySelector('#sh-level').value);
+      const note = m.el.querySelector('#sh-note').value.trim();
+      targets.forEach(to => S.addShare({ kind, title, from: myBid || 'troop', to, level, note }));
+      S.audit('發出分享', title, `去 ${targets.map(t => t === 'all' ? '全旅' : S.branchName(t)).join('、')}`);
+      m.close();
+      toast(targets.length > 1 ? `已送出 ${targets.length} 條分享 —— 各自等對方接收` : '已送出 —— 等對方接收', 'ok');
+      go('shares?tab=sent');
     };
   });
 }

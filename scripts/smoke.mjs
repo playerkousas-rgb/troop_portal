@@ -75,6 +75,7 @@ const S = await import('../assets/js/lib/store.js');
 const A = await import('../assets/js/lib/auth.js');
 const R = await import('../assets/js/lib/registry.js');
 const main = await import('../assets/js/main.js');
+const { gatePreflight } = await import('../assets/js/views/branches.js');
 
 await test('旅閘：未登入就顯示揀旅／登入', async () => {
   assert(text().includes('旅系統'), 'gate 冇顯示');
@@ -416,6 +417,153 @@ await test('★ 支部系統登入通道：UI 只有旅長見掣、教練員冇'
   const v2 = document.getElementById('view');
   assert(!v2.querySelector('[data-gate]'), '教練員唔應該有掣');
   assert(v2.textContent.includes('唔可以改'), '冇講明冇權');
+});
+
+await test('★ 帳號下限：每個 leaf 至少留 1 個領袖戶（刪／停用會被擋）', async () => {
+  /* 用戶 2026-09-25：「呢個係指 DELETE ACCOUNT，要保留最小 1 個」 */
+  A.loginAs('u-chief');
+  /* 超管：唔可以停用／刪除（第二層備援） */
+  assert(S.removalGuard(S.load().users.find(u => u.id === 'u-super')).ok === false, '超管竟然刪得／停用得到');
+  /* 旅長：得一個 → 停用／刪除都要擋（同舊有「旅長唔可以停用」一致） */
+  const chief = S.load().users.find(u => u.id === 'u-chief');
+  assert(S.removalGuard(chief).ok === false && S.removalGuard(chief).msg.includes('最後一個領袖戶'), '最後一個旅長竟然刪得');
+  /* 支部：幼童軍團有 2 個領袖戶（團長＋副團長）→ 刪一個得，刪淨一個唔得 */
+  const l1 = S.load().users.find(u => u.id === 'u-b-leader');
+  const l2 = S.load().users.find(u => u.id === 'u-b-leader2');
+  assert(l1.identity === '團長' && l2.identity === '副團長', '示範前提唔啱（幼童軍團應該有團長＋副團長）');
+  assert(S.removalGuard(l1).ok === true && S.removalGuard(l1).rest === 1, '仲有副團長就應該刪得');
+  const d1 = S.removeUserAccount(l1.id);
+  assert(d1.ok && !S.userById(l1.id) && S.load().removedUsers[0].name === '鄭美玲', '刪除帳號失敗／冇留紀錄');
+  const guard2 = S.removalGuard(l2);
+  assert(guard2.ok === false && guard2.msg.includes('得呢一個領袖戶'), '刪淨一個領袖戶竟然過得');
+  assert(S.setUserStatus(l2.id, 'disabled').ok === false, '停用最後一個領袖戶竟然過得');
+  assert(S.removeUserAccount(l2.id).ok === false, '刪除最後一個領袖戶竟然過得');
+  assert(S.userById(l2.id), '擋唔到就唔應該真係刪咗');
+  /* 非領袖戶（團員）：刪得 */
+  const scout = S.load().users.find(u => u.role === 'member' && u.identity === '團員');
+  assert(S.removalGuard(scout).ok === true, '團員應該刪得');
+  /* UI：最後一個領袖戶冇「停用」掣、全部有「刪除」掣 */
+  main.boot();
+  fireHash(w, '#/users?tab=list');
+  const v = document.getElementById('view');
+  assert(v.querySelector('[data-remove]'), '名單冇「刪除帳號」掣');
+  assert(!v.querySelector('[data-disable="u-b-leader2"]'), '最後一個領袖戶唔應該有停用掣');
+  assert(v.textContent.includes('最後一個領袖戶'), '冇標示「最後一個領袖戶」');
+  /* 還原示範狀態：鄭美玲返嚟 */
+  S.commit(d => {
+    d.users.push({ id: 'u-b-leader', role: 'member', name: '鄭美玲', email: 'cs-leader@demo.troop', phone: '9567 1234', title: '幼童軍團長', anchor: '幼童軍團 SHEET（cs0082）', ageGroup: 'adult', branchId: 'cs0082', ymis: 'YMIS-2010', identity: '團長', branchAccess: ['cs0082'], status: 'active', mustChangePw: false, at: '2026-09-02 09:10', lastLogin: '2026-09-24 20:15' });
+    d.removedUsers = [];
+  }, { markDirty: true });
+  assert(!!S.userById('u-b-leader') && S.removalGuard(S.userById('u-b-leader2')).ok === true, '還原示範狀態失敗');
+});
+
+await test('★ 閂口前置檢查：接駁燈綠／測試連線／進度已登記（未達標出警告，唔硬擋）', async () => {
+  /* 升級 MD §12④：先搬數、先測連線，先至閂口 —— 用戶 2026-09-25 同意「未達標出警告」 */
+  A.loginAs('u-chief');
+  const chk = st => S.load().branches.find(b => b.id === st);
+  /* 幼童軍團：全綠 → 全部達標 */
+  const okAll = gatePreflight('cs0082');
+  assert(okAll.length === 4 && okAll.every(c => c.ok), '幼童軍團應該全部達標');
+  /* 童軍團：黃燈（未閂口）→ 接駁燈一項唔達標 */
+  const y1 = gatePreflight('sc0082').filter(c => !c.ok).map(c => c.k);
+  assert(y1.includes('接駁燈綠（已接駁）'), '黃燈應該提示接駁未落實');
+  /* 樂行童軍團：冇 testedAt → 測試連線一項唔達標 */
+  assert(gatePreflight('rs0082').some(c => !c.ok && c.k.includes('測試連線')), '樂行冇測試紀錄應該提示');
+  /* 未登記（小童軍團）：紅燈＋冇進度來源 → 多過一項唔達標 */
+  assert(gatePreflight('gs0082').filter(c => !c.ok).length >= 2, '未登記下游應該多項唔達標');
+  /* UI：撳「閂支部系統登入」→ 對話框有前置檢查清單
+     （示範資料冇「綠燈＋未閂」嘅團，所以臨時砌一個：幼童軍團開返＋保持綠燈） */
+  S.commit(d => {
+    const b = d.branches.find(x => x.id === 'cs0082');
+    b.link.gate = 'open'; b.link.localLogin = true; b.link.state = 'green';
+    d.downstream.cs0082.localLogin = true;
+  }, { markDirty: true });
+  assert(gatePreflight('cs0082').every(c => c.ok), '臨時狀態應該全部達標');
+  main.boot();
+  fireHash(w, '#/branch/cs0082?tab=link');
+  const v = document.getElementById('view');
+  const btn = v.querySelector('[data-gate="cs0082"][data-g="sig-only"]');
+  assert(btn && btn.disabled === false, '應該有「閂支部系統登入」掣（幼童軍團而家係綠燈）');
+  btn.click();
+  await new Promise(r => setTimeout(r, 40));
+  const dlg = document.querySelector('.mask');
+  assert(dlg && dlg.textContent.includes('閂口前置檢查'), '對話框冇前置檢查');
+  assert(dlg.textContent.includes('測試連線成功') && dlg.textContent.includes('進度下游已登記'), '前置檢查唔齊');
+  assert(dlg.textContent.includes('全部達標'), '全綠應該顯示全部達標');
+  dlg.querySelector('[data-no]').click();
+  await new Promise(r => setTimeout(r, 20));
+  /* 未達標嘅：童軍團（黃燈）→ 出警告但仍然閂得到 */
+  main.boot();
+  fireHash(w, '#/branch/sc0082?tab=link');
+  const v2 = document.getElementById('view');
+  v2.querySelector('[data-gate="sc0082"][data-g="sig-only"]').click();
+  await new Promise(r => setTimeout(r, 40));
+  const dlg2 = document.querySelector('.mask');
+  assert(dlg2.textContent.includes('項未達標'), '未達標應該出警告');
+  assert(dlg2.querySelector('[data-yes]').textContent.includes('閂'), '唔硬擋：應該仍然有閂嘅掣');
+  dlg2.querySelector('[data-yes]').click();
+  await new Promise(r => setTimeout(r, 40));
+  assert(S.branchGate('sc0082') === 'sig-only', '確認之後應該真係閂到（唔硬擋）');
+  assert(S.load().audit[0].detail.includes('前置檢查'), '審計應該記低前置檢查結果');
+  /* 還原示範狀態：童軍團兩條通道都開、幼童軍團回復「閂咗（綠燈）」 */
+  S.setBranchGate('sc0082', 'open');
+  S.commit(d => {
+    const b = d.branches.find(x => x.id === 'cs0082');
+    b.link.gate = 'sig-only'; b.link.localLogin = false; b.link.state = 'green';
+    b.link.gateBy = '陳大文'; b.link.gateAt = '2026-09-20 11:05';
+    d.downstream.cs0082.localLogin = false;
+  }, { markDirty: true });
+  assert(S.branchGate('cs0082') === 'sig-only', '幼童軍團還原失敗');
+  S.commit(d => { d.audit = d.audit.filter(a => !String(a.detail || '').includes('前置檢查')); }, { markDirty: true });
+  assert(S.branchGate('sc0082') === 'open', '還原示範狀態失敗');
+});
+
+await test('★ 分享：發方揀對象（可多選）＋收方決定（唔想就退回，唔會硬塞）', async () => {
+  A.loginAs('u-b-leader2');               // 幼童軍團副團長（有決定權）
+  main.boot();
+  fireHash(w, '#/shares?tab=sent');
+  const v = document.getElementById('view');
+  const before = S.sharesFromMe('cs0082').length;
+  v.querySelector('#sh-new').click();
+  await new Promise(r => setTimeout(r, 40));
+  const dlg = document.querySelector('.mask');
+  assert(dlg, '冇「發起分享」對話框');
+  assert(dlg.textContent.includes('可以揀多過一個'), '冇講明可以揀多個支部');
+  assert(dlg.textContent.includes('對方決定收唔收'), '冇講明收方決定');
+  assert(dlg.querySelectorAll('[data-sh-to]').length >= 4, '目標支部清單唔齊');
+  assert(dlg.querySelector('[data-sh-all]'), '冇「全旅」選項');
+  dlg.querySelector('#sh-title').value = '幼童軍秋季旅行（歡迎一齊）';
+  dlg.querySelector('#sh-kind').value = 'event';
+  dlg.querySelector('[data-sh-to="vs0082"]').checked = true;
+  dlg.querySelector('[data-sh-to="sc0082"]').checked = true;
+  dlg.querySelector('[data-save]').click();
+  await new Promise(r => setTimeout(r, 60));
+  const made = S.shares().filter(x => x.title === '幼童軍秋季旅行（歡迎一齊）');
+  assert(made.length === 2, `應該一對象一條分享（實際 ${made.length}）`);
+  assert(made.every(x => x.state === 'pending' && x.from === 'cs0082'), '新分享應該係待接收');
+  /* 收方（童軍團）決定：退回唔想參與 */
+  A.loginAs('u-m-minor');                 // 童軍團副隊長（rank < 3 → 唔夠權決定）
+  main.boot();
+  fireHash(w, '#/shares');
+  const v2 = document.getElementById('view');
+  assert(v2.textContent.includes('待接收') && v2.textContent.includes('幼童軍秋季旅行'), '收方應該見到待接收');
+  const canDecide = !!v2.querySelector('[data-decide]');
+  assert(canDecide === false, 'rank < 3 唔應該有決定掣（只可以加註解）');
+  A.loginAs('u-b-leader2');               // 用返有權嘅身份去收（示範：用旅長代勞亦可）
+  A.loginAs('u-chief');
+  main.boot();
+  fireHash(w, '#/shares');
+  const target = S.shares().find(x => x.title === '幼童軍秋季旅行（歡迎一齊）' && x.to === 'sc0082');
+  assert(target && target.state === 'pending', '收件方應該見到待接收');
+  const dec = S.decideShare(target.id, 'declined', '童軍團領袖唔想小朋友參與', { by: '李美儀' });
+  assert(dec.ok !== false, '退回失敗');
+  const after = S.shares().find(x => x.id === target.id);
+  assert(after.state === 'declined' && (after.decideNote || '').includes('唔想'), '退回應該留理由');
+  assert(after.decidedBy, '退回應該記低邊個決定');
+  /* 未接收嘅分享唔會混入收件方清單（唔會硬塞） */
+  assert(!S.acceptedShares('sc0082').some(x => x.id === target.id), '退回咗嘅分享唔應該出現喺清單');
+  /* 清走示範測試資料 */
+  S.commit(d => { d.shares = d.shares.filter(x => x.title !== '幼童軍秋季旅行（歡迎一齊）'); }, { markDirty: true });
 });
 
 await test('★ 超管：唔經支部 SHEET 登記 → 任何支部／模組都入得（第二層備援）', async () => {

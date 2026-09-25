@@ -194,6 +194,7 @@ export function renderDetail(el, { id }, query = {}) {
 → { success:true, data:{ unit, localLogin:true|false, confirmed:true } }</div>
         <div class="xs faint mt-8">下游寫入 · 上游唔會代寫 · 每次改動入審計（邊個／幾時）</div>
         <div class="xs faint mt-4">★ 有冇人入唔到？佢哋撳「🆘 求救」就送到嚟呢度（免登入）；閂之前唔使登記任何匙。★ 平台超管唔受呢個掣影響（驗身唔經下游登記）；本地領袖戶／SUPER 本地戶就一樣 <span class="mono">403</span>。</div>
+        <div class="xs faint mt-4">★ 落閂前會自動做<b>前置檢查</b>：接駁燈綠／測試連線成功／進度下游已登記（升級 MD §12④）；未達標出警告，但唔硬擋（你仍然可以閂）。</div>
         `,
         ...(canEdit ? {} : {})
       });
@@ -464,6 +465,32 @@ function pingBranch(id) {
   }, 600);
 }
 
+/* ★ 閂口前置檢查（升級 MD §12④：先搬數、先測連線，先至閂口）
+   未達標＝出警告；唔硬擋（用戶 2026-09-25 定案：未達標出警告，同意）。 */
+export function gatePreflight(id) {
+  const b = S.branchById(id);
+  if (!b) return [];
+  const dd = S.load().downstream[id] || {};
+  return [
+    {
+      k: '接駁燈綠（已接駁）', ok: b.link.state === 'green',
+      hint: b.link.state === 'green' ? '已接駁、名冊／進度讀得到' : `而家係${b.link.state === 'yellow' ? '黃燈（已登記、未閂口）' : '紅燈（未登記）'} —— 接駁未落實`
+    },
+    {
+      k: '測試連線成功（sig）', ok: !!b.link.testedAt,
+      hint: b.link.testedAt ? `上次測試：${b.link.testedAt}` : '未測過連線 —— 閂咗之後有事查唔到'
+    },
+    {
+      k: '進度下游已登記', ok: !!b.progressSource,
+      hint: b.progressSource ? `進度來源：${b.progressSource}` : '進度頁未接好 —— 升級 MD 寫明「未起好呢條路之前唔好閂口」'
+    },
+    {
+      k: '帳號下限（該 leaf 仲有領袖戶）', ok: true,
+      hint: '本地領袖戶照留；閂咗之後佢一樣 403，但戶口唔會消失（有咩事入 Sheet 都搵得返人）'
+    }
+  ].map(x => ({ ...x, key: x.k }));
+}
+
 /* ★ 支部系統登入通道：兩個狀態，旅側唯一控制面 */
 async function setBranchGateUI(id, gate) {
   const b = S.branchById(id);
@@ -481,10 +508,21 @@ async function setBranchGateUI(id, gate) {
       ok: '閂咗佢', danger: true
     }
   }[gate];
-  const msg = copy.msg + (gate === 'sig-only'
+  let msg = copy.msg + (gate === 'sig-only'
     ? `<div class="mt-12 xs faint">有人入唔到：叫佢撳 <b>🆘 求救</b>（${RESCUE.entry}&b=${id}，免登入）—— 求救單會出現喺呢一頁同「待辦與批核」，你撳一下「開返支部系統登入」就搞返。</div>`
     : '');
-  if (await confirmDlg({ title: copy.title, message: msg, ok: copy.ok, danger: copy.danger })) await applyGate(id, gate);
+  /* 閂口前置檢查（未達標＝警告；唔硬擋） */
+  let failed = [];
+  if (gate === 'sig-only') {
+    const checks = gatePreflight(id);
+    failed = checks.filter(c => !c.ok);
+    msg += `<div class="mt-12"><b>閂口前置檢查</b>（升級 MD §12④：先搬數、先測連線，先至閂口）<div class="mt-8">
+      ${checks.map(c => `<div class="${c.ok ? '' : 'err'}">${c.ok ? '✓' : '✗'} <b>${esc(c.k)}</b> <span class="xs faint">${esc(c.hint)}</span></div>`).join('')}
+    </div>${failed.length ? `<div class="err mt-8"><b>⚠ ${failed.length} 項未達標</b> —— 你仍然可以閂（唔硬擋），但先確認：名冊／進度已搬齊？救援路線（求救掣）貼咗去團長群？</div>` : '<div class="xs faint mt-8">全部達標 ✓</div>'}</div>`;
+  }
+  if (await confirmDlg({ title: copy.title, message: msg, ok: copy.ok, danger: copy.danger })) {
+    await applyGate(id, gate, failed.length ? `前置檢查未達標：${failed.map(c => c.k).join('、')}` : '前置檢查全部達標');
+  }
 }
 
 /* 🆘 求救：ADMIN 處理（開返閘／重設密碼／答覆結案）—— 全部人手做，逐單留紀錄 */
@@ -523,12 +561,12 @@ async function handleRescue(id, action) {
   go('branch/' + r.branchId + '?tab=link');
 }
 
-async function applyGate(id, gate) {
+async function applyGate(id, gate, detail = '') {
   const b = S.branchById(id);
   const r = S.setBranchGate(id, gate);
   if (!r.ok) { toast(r.msg, 'err', '', null, 6000); return; }   // 誠實失敗：唔會當成功
   S.audit(gate === 'sig-only' ? '閂支部系統登入' : '開返支部系統登入', `${b.name}（${id}）`,
-    `gate=${gate}（示範：唔會真發 sig；真模式＝下游 setGate 回 confirmed）`, 'sig');
+    `gate=${gate}（示範：唔會真發 sig；真模式＝下游 setGate 回 confirmed）${detail ? ' · ' + detail : ''}`, 'sig');
   toast(gate === 'sig-only'
     ? '已送 sig：下游回 confirmed —— 支部系統唔可以自己登入'
     : '已送 sig：下游回 confirmed —— 支部系統可以自己登入', 'ok', '', null, 5000);
