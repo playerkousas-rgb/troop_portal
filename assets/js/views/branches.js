@@ -3,7 +3,7 @@ import { esc, icon, money, fmtDate, copyText, qrSvg, toast, sanitizeLabel, state
 import * as S from '../lib/store.js';
 import { go } from '../lib/router.js';
 import { page, card, stat, badge, linkBadge, table, kv, head, notice, progressBar, modal } from './ui.js';
-import { can, moduleEnabled, shareableTargets, visName, moduleList, GATE_STATES, gateOfLink, gateMeta } from '../lib/registry.js';
+import { can, moduleEnabled, shareableTargets, visName, moduleList, GATE_STATES, gateOfLink, gateMeta, GATE_ESCAPE } from '../lib/registry.js';
 
 export function render(el) {
   const d = S.load();
@@ -197,6 +197,58 @@ export function renderDetail(el, { id }, query = {}) {
         ...(canEdit ? {} : {})
       });
     })()}
+    ${(() => {
+      const escRec = S.branchEscape(b.id);
+      const ack = S.branchEscapeAck(b.id);
+      const owner = S.escOwner(b.id);
+      const mm = S.gateMismatch(b.id);
+      const canEdit = can(role, 'branch_link_edit');
+      const escHtml = escRec ? `${esc(escRec.by)} · ${esc(escRec.at)}${escRec.why ? `<div class="xs faint">原因：${esc(escRec.why)}</div>` : ''}` : '<span class="faint">—（冇用過）</span>';
+      return card({
+        title: '★ 防死鎖：逃生門（單向）', sub: '「閂」係旅側獨有 ｜ 「開」永遠有出路 —— 出路喺 Sheet 擁有者手上，唔係支部系統前台',
+        body: `
+        ${notice('為咩要逃生門：<b>旅側控制面一旦壞</b>（旅 GAS 停權／Vercel 部署壞／sig 密鑰唔見／旅長冇人接手），而呢個下游又<b>閂咗自己登入</b> —— 兩邊都冇路入，就係死鎖。<br><b>單向原則</b>：「閂」係旅側獨有嘅決定；「開」永遠有出路，而且<b>出路唔經旅側</b>（所以旅側死都走得甩）。出路<b>唔係支部系統前台嘅掣</b>（有掣就變返支部自己決定），而係 <b>Sheet／Apps Script 擁有者級</b>嘅手動解鎖 —— 只回復原狀（<span class="mono">ALLOW_LOCAL_LOGIN</span> 未設定＝open），<b>冇提升任何權限</b>：做得呢步嘅人（專案擁有者）本身已經睇得到全部資料。', 'info')}
+        ${mm.mismatch ? notice(`⚠ <b>偵測到本地解鎖（逃生門用過）</b>：下游實際「可以自己登入」，但旅側記錄係「閂咗支部系統登入」。<br>${esc(escRec?.by || '（下游冇留紀錄）')} · ${esc(escRec?.at || '')}${escRec?.method ? `<br>方式：${esc(escRec.method)}` : ''}${escRec?.why ? `<br>原因：${esc(escRec.why)}` : ''}<br><b>旅長拍板</b>：接受（記錄改為開）定再閂返？未拍板就一路標示住。`, 'warn') : ''}
+        ${!mm.mismatch && ack ? `<div class="xs faint mt-8">上次逃生門（已處理：${ack.mode === 'accept' ? '旅接受，記錄改為開' : '旅再閂返'}）：${esc(ack.by)} · ${esc(ack.at)}</div>` : ''}
+        ${kv([
+          ['逃生門鑰匙（專案擁有者）', owner
+            ? `<span class="mono xs">${esc(owner.email)}</span><div class="xs faint">${esc(owner.note || '')}${owner.by ? ` · 登記：${esc(owner.by)} ${esc(owner.at || '')}` : ''}</div>`
+            : '<span class="faint">未登記 —— 建議即刻登記：呢個人係旅側壞死時唯一救得返嘅人</span>'],
+          ['本地解鎖紀錄（ESC_LOG）', escHtml],
+          ['下游真相（localLogin）', mm.known
+            ? (mm.truth ? '可以自己登入（open）' : '唔可以自己登入（sig-only）')
+            : '<span class="faint">未讀到（fail-closed：當閂）</span>'],
+          ['重開方法', `入下游 Sheet／Apps Script 刪 <span class="mono">${GATE_ESCAPE.property}</span>（未設定＝open）—— 唔經旅側、離線都做到`]
+        ])}
+        ${notice(`<b>落閂前檢查</b>：<br>${GATE_ESCAPE.before.map((x, i) => `${i + 1}. ${x}`).join('<br>')}`, 'warn')}
+        ${canEdit ? `<div class="btn-row mt-12">
+          <button class="btn sm" data-esc-owner="${b.id}">${icon('key', 13)} ${owner ? '改逃生門鑰匙' : '登記逃生門鑰匙'}</button>
+          ${mm.mismatch ? `<button class="btn sm" data-esc="${b.id}" data-esc-mode="accept">${icon('check', 13)} 接受：記錄改為開</button>
+          <button class="btn sm danger" data-esc="${b.id}" data-esc-mode="relock">${icon('lock', 13)} 再閂返（sig）</button>` : ''}
+        </div>` : `<div class="xs faint mt-12">你嘅角色唔可以改（要 <span class="mono">branch_link_edit</span> ＝ 旅長）；逃生門步驟本身唔受權限影響（要嘅係 Sheet 擁有權）。</div>`}
+        `,
+        actions: `<button class="btn sm" data-copy-esc="${b.id}">${icon('copy', 13)} 複製逃生門步驟</button>`
+      });
+    })()}
+    ${card({ title: '逃生門：幾時要用 · 點樣重開', sub: '手動解鎖 = 唯一出路，而且只喺下游側做得到',
+      body: `
+      ${table({ cls: 'tbl compact', head: ['死鎖情境', '例子'], rows: GATE_ESCAPE.deadlocks.map(x => ({ cells: [esc(x.k), `<span class="xs">${esc(x.d)}</span>`] })), empty: '—' })}
+      <ol class="mt-12 sm">${GATE_ESCAPE.steps.map(s2 => `<li>${s2}</li>`).join('')}</ol>
+      <div class="xs faint mt-8">下游 <span class="mono">Code.gs</span> 模板要有一個 <span class="mono">${GATE_ESCAPE.rescueFn}</span>：刪屬性 ＋ 寫 <span class="mono">ESC_LOG</span>（時間／email／原因）＋ 回 <span class="mono">escOpened:true</span>。<b>單向：只有開，冇關</b>（本地永遠造唔出「閂」）。</div>
+      <div class="xs faint mt-4">平台超管係另一條備援（重設旅長密碼，救返旅側控制面）—— 但佢依賴平台／網絡，所以唔可以取代 Sheet 級逃生門。</div>
+      ` })}
+    ${card({ title: '逃生門用過之後嘅規矩', sub: '唔會靜靜地收返',
+      body: `<div class="sm">
+      · 下游一定寫自己嘅 <span class="mono">ESC_LOG</span>，回 <span class="mono">escOpened:true</span>；<br>
+      · 旅側下次握手見到 <b>記錄 ≠ 下游真相</b> → 呢張卡出 ⚠，等旅長拍板（接受／再閂返）—— 唔會自動再閂（自動再閂會喺旅側未修好時又鎖死一次）；<br>
+      · 拍板兩條路都入旅 <span class="mono">AUDIT_LOG</span>（接受＝UI；再閂＝sig），下游亦各寫一次；<br>
+      · 逃生門用過唔會「降級」個閂：旅側隨時可以再閂返（再閂＝新一次決定，匙仍然喺下游手上）。
+      </div>` })}
+    ${card({ title: '其他（唔係逃生門）', sub: '呢啲入唔到，就係入唔到 —— 唔好當佢係出路', body: `<div class="sm">
+      · 本地領袖戶／SUPER 本地戶：閂咗之後一樣 <span class="mono">403</span>（否則閂嘅意思就冇咗）；<br>
+      · 支部系統前台：永遠冇「解鎖」掣（有掣＝支部自己決定，違反定案）；<br>
+      · 旅入口（<span class="mono">sig</span>）／平台超管：係旅側自己嘅路，旅側壞就跟住壞，唔算逃生門。
+      </div>` })}
     ${card({ title: '接駁測試與診斷', actions: `<button class="btn sm" data-ping="${b.id}">${icon('refresh', 13)} 測試連線（sig）</button>`,
       body: `<div class="mono-block">POST ${esc(dd.url || '（未登記）')}
 ？sig=&sts=…&snonce=…   （query 通道；防 GAS 302 轉址遺失）
@@ -283,6 +335,9 @@ export function renderDetail(el, { id }, query = {}) {
   el.querySelectorAll('[data-enter]').forEach(x => x.addEventListener('click', () => openEnterBranch(x.dataset.enter)));
   el.querySelector('[data-ping]')?.addEventListener('click', () => pingBranch(b.id));
   el.querySelectorAll('[data-gate]').forEach(x => x.addEventListener('click', () => setBranchGateUI(b.id, x.dataset.g)));
+  el.querySelectorAll('[data-esc]').forEach(x => x.addEventListener('click', () => resolveEscapeUI(b.id, x.dataset.escMode)));
+  el.querySelector('[data-esc-owner]')?.addEventListener('click', () => setEscOwnerUI(b.id));
+  el.querySelector('[data-copy-esc]')?.addEventListener('click', () => { copyText(escStepsText()); toast('已複製逃生門步驟（可以直接貼去團長群）', 'ok', '', null, 5000); });
   el.querySelector('[data-register]')?.addEventListener('click', () => openRegisterDownstream(b.id));
   el.querySelector('[data-open-account]')?.addEventListener('click', () => openAccountFor(b.id));
   el.querySelector('[data-bulk]')?.addEventListener('click', () => openBulk(b.id));
@@ -405,11 +460,57 @@ async function setBranchGateUI(id, gate) {
     },
     'sig-only': {
       title: '閂「支部系統自己登入」',
-      msg: `之後：支部系統<b>唔可以自己登入</b>（本地直接登入回 403）—— <b>就算已登記、經 sig 睇到張 SHEET，都唔畀佢入</b>；出入只經旅入口。<div class="mt-8">• 下游唔會收到本地登入請求（前端路徑已由旅接手）<br>• 每個下游至少留一個本地領袖戶＋SUPER 作災難恢復</div>`,
+      msg: `之後：支部系統<b>唔可以自己登入</b>（本地直接登入回 403）—— <b>就算已登記、經 sig 睇到張 SHEET，都唔畀佢入</b>；出入只經旅入口。<div class="mt-8">• 下游唔會收到本地登入請求（前端路徑已由旅接手）<br>• <b>逃生門（防死鎖）</b>：旅側壞死時，下游可以入自己 Sheet／Apps Script 刪 <span class="mono">ALLOW_LOCAL_LOGIN</span> 自己開返（單向，只有開）<br>• 本地領袖戶／SUPER 本地戶<b>唔係</b>逃生門（閂咗一樣 403）—— 匙要喺該團專案擁有者手上${S.escOwner(id) ? `：<span class="mono">${esc(S.escOwner(id).email)}</span>` : '（<b>未登記</b> —— 建議閂之前先登記）'}</div>`,
       ok: '閂咗佢', danger: true
     }
   }[gate];
   if (await confirmDlg({ title: copy.title, message: copy.msg, ok: copy.ok, danger: copy.danger })) await applyGate(id, gate);
+}
+
+/* ★ 逃生門（防死鎖）：旅側只係「知悉／拍板」；開返嘅動作本身喺下游 Sheet 級做 */
+const escStepsText = () => GATE_ESCAPE.steps.map((s2, i) => `${i + 1}. ${s2}`).join('\n');
+
+async function resolveEscapeUI(id, mode) {
+  const b = S.branchById(id);
+  const { confirmDlg } = await import('../lib/util.js');
+  const copy = mode === 'accept'
+    ? {
+      title: '接受本地解鎖？',
+      msg: `記錄改為「支部系統入得」—— 下游本身已經係開，<b>唔會發 sig</b>；同時把 ⚠ 標示收返。<br>日後想閂返，隨時喺上面撳「閂支部系統登入」。`,
+      ok: '接受並記錄', danger: false
+    }
+    : {
+      title: '再閂返「支部系統自己登入」？',
+      msg: `會發 sig <span class="mono">setGate</span> 落下游再寫 <span class="mono">ALLOW_LOCAL_LOGIN=false</span>。<br><b>逃生門唔會失效</b>：下次旅側壞，下游照樣可以入 Sheet 自己解鎖。`,
+      ok: '再閂返', danger: true
+    };
+  if (!(await confirmDlg({ title: copy.title, message: copy.msg, ok: copy.ok, danger: copy.danger }))) return;
+  const r = S.resolveEscape(id, mode);
+  if (!r.ok) { toast(r.msg, 'err', '', null, 6000); return; }      // 誠實失敗：唔會當成功
+  S.audit(mode === 'accept' ? '接受本地解鎖（逃生門）' : '再閂支部系統登入（逃生門後）', `${b.name}（${id}）`,
+    mode === 'accept' ? '下游實際已開；旅側記錄改為 open（唔發 sig）' : 're-assert gate=sig-only（sig）',
+    mode === 'accept' ? 'UI' : 'sig');
+  toast(mode === 'accept' ? '已拍板：接受本地解鎖（兩條通道都開）' : '已送 sig：下游回 confirmed —— 再閂返', 'ok', '', null, 5000);
+  go('branch/' + id + '?tab=link');
+}
+
+async function setEscOwnerUI(id) {
+  const b = S.branchById(id);
+  const { promptDlg } = await import('../lib/util.js');
+  const cur = S.escOwner(id);
+  const email = await promptDlg({
+    title: `逃生門鑰匙 · ${b.name}`,
+    label: '專案擁有者嘅 Google 帳號（下游 Sheet／Apps Script 擁有者）',
+    value: cur?.email || '', placeholder: 'leader82@gmail.com',
+    hint: '呢個人係旅側壞死時唯一救得返嘅人。要下游側擁有（唔可以係旅系統自己）。'
+  });
+  if (!email) return;
+  const note = await promptDlg({ title: '匙喺邊個手上', label: '持有人／職位（備註）', value: cur?.note || '', placeholder: '曾國強（樂行童軍團長）· 專案擁有者' });
+  const r = S.setEscOwner(id, { email, note: note || '' });
+  if (!r.ok) { toast(r.msg, 'err'); return; }
+  S.audit('登記逃生門鑰匙', `${b.name}（${id}）`, email, 'UI');
+  toast('已登記逃生門鑰匙 —— 旅側死咗都有人救得返', 'ok', '', null, 5000);
+  go('branch/' + id + '?tab=link');
 }
 
 async function applyGate(id, gate) {

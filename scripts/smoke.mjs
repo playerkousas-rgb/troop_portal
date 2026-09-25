@@ -416,6 +416,74 @@ await test('★ 支部系統登入通道：UI 只有旅長見掣、教練員冇'
   assert(v2.textContent.includes('唔可以改'), '冇講明冇權');
 });
 
+await test('★ 防死鎖：逃生門（單向）—— 下游自己開得返，旅側只負責知悉／拍板', async () => {
+  /* 定義：同文件共用 GATE_ESCAPE 一份（唔可以兩邊各寫一套） */
+  assert(R.GATE_ESCAPE.property === 'ALLOW_LOCAL_LOGIN', '逃生門屬性定義唔啱');
+  assert(R.GATE_ESCAPE.unsetIs === 'open', '冇講明「未設定＝開」');
+  assert(R.GATE_ESCAPE.steps.length >= 4 && R.GATE_ESCAPE.deadlocks.length >= 3, '逃生門步驟／死鎖情境唔夠');
+  assert(R.GATE_ESCAPE.steps.join(' ').includes('未設定＝開'), '逃生門步驟冇講「未設定＝開」');
+  assert(R.GATE_ESCAPE.before.join(' ').includes('本地領袖戶'), '落閂前檢查冇講「本地領袖戶唔係逃生門」');
+
+  /* 鑰匙持有人 ＝ 下游 Sheet／Apps Script 專案擁有者 */
+  A.loginAs('u-chief');
+  const w1 = S.setEscOwner('sc0082', { email: 'sc82.owner@gmail.com', note: '李美儀（團長）· 專案擁有者' });
+  assert(w1.ok && S.escOwner('sc0082').email === 'sc82.owner@gmail.com', '逃生門鑰匙登記唔到');
+  assert(S.setEscOwner('sc0082', { email: '  ' }).ok === false, '空 email 竟然收貨');
+
+  /* 旅側記錄 vs 下游真相：樂行用過本地解鎖 → 偵測到唔一致 */
+  assert(S.branchGate('rs0082') === 'sig-only' && S.gateMismatch('rs0082').mismatch === true, '偵測唔到本地解鎖');
+  assert((S.branchEscape('rs0082').by || '').includes('曾國強'), '本地解鎖紀錄唔啱');
+
+  /* UI：旅長見到 ⚠ ＋ 兩個拍板掣；教練員睇到步驟但冇掣 */
+  main.boot();
+  fireHash(w, '#/branch/rs0082?tab=link');
+  const v = document.getElementById('view');
+  assert(v.textContent.includes('防死鎖') && v.textContent.includes('偵測到本地解鎖'), '逃生門卡／⚠ 冇出現');
+  assert(v.querySelector('[data-esc="rs0082"][data-esc-mode="accept"]'), '冇「接受」掣');
+  assert(v.querySelector('[data-esc="rs0082"][data-esc-mode="relock"]'), '冇「再閂返」掣');
+  assert(v.querySelector('[data-copy-esc]'), '冇「複製逃生門步驟」掣');
+  assert(v.textContent.includes('唔係支部系統前台'), '冇講明出路唔喺支部系統前台');
+  A.loginAs('u-lee');                     // 教練員
+  main.boot();
+  fireHash(w, '#/branch/rs0082?tab=link');
+  const v2 = document.getElementById('view');
+  assert(v2.textContent.includes('ALLOW_LOCAL_LOGIN'), '教練員睇唔到逃生門步驟');
+  assert(!v2.querySelector('[data-esc]') && !v2.querySelector('[data-esc-owner]'), '教練員唔應該有拍板／改匙掣');
+
+  /* 還原示範狀態：樂行留返「⚠ 本地解鎖待拍板」（真模式＝旅側下次握手讀返下游真相） */
+  const restoreEscapeDemo = () => S.commit(d => {
+    const b = d.branches.find(x => x.id === 'rs0082');
+    b.link.gate = 'sig-only'; b.link.localLogin = false; b.link.state = 'green';
+    b.link.gateBy = '陳大文'; b.link.gateAt = '2026-09-23 22:10';
+    b.link.esc = { at: '2026-09-25 02:10', by: '曾國強（團長）', method: 'Apps Script 手動解鎖（unlockLocalLogin）', why: '旅側 GAS 停權維修中，活動日要開名單' };
+    b.link.escAck = null;
+    d.downstream.rs0082.localLogin = true; d.downstream.rs0082.escOpened = true;
+    d.downstream.sc0082.escOwner = { email: 'sc82.owner@gmail.com', note: '李美儀（童軍團長）· 專案擁有者', at: '2026-09-22 10:15', by: '陳大文' };
+  }, { markDirty: true });
+
+  /* 拍板 1：接受 → 記錄改為開、⚠ 收返（唔發 sig：下游本身已經係開） */
+  A.loginAs('u-chief');
+  const ra = S.resolveEscape('rs0082', 'accept');
+  assert(ra.ok && S.branchGate('rs0082') === 'open', '接受本地解鎖冇改到記錄');
+  assert(S.gateMismatch('rs0082').mismatch === false, '接受之後應該一致（兩條通道都開）');
+  assert(S.branchEscape('rs0082') === null && S.branchEscapeAck('rs0082').mode === 'accept', '接受之後冇清 ⚠／冇留紀錄');
+  /* 拍板 2：再閂返 → sig 再寫一次；下游回 confirmed → 一樣一致 */
+  restoreEscapeDemo();
+  const rr = S.resolveEscape('rs0082', 'relock');
+  assert(rr.ok && S.branchGate('rs0082') === 'sig-only', '再閂返冇寫入');
+  assert(S.gateMismatch('rs0082').mismatch === false, '再閂返之後應該一致（下游 confirmed）');
+  assert(S.branchEscapeAck('rs0082').mode === 'relock', '再閂返冇留紀錄');
+
+  /* fail-closed：未登記下游，拍板一樣改唔到（唔會扮成功） */
+  assert(S.resolveEscape('gs0082', 'relock').ok === false, '未登記下游竟然改得到');
+  assert(S.resolveEscape('gs0082', 'accept').ok === false, '未登記下游竟然接受得到');
+  assert(S.resolveEscape('nope', 'accept').ok === false, '唔存在嘅支部竟然接受得到');
+
+  /* 收尾：留住「⚠ 本地解鎖待拍板」示範狀態 */
+  restoreEscapeDemo();
+  assert(S.gateMismatch('rs0082').mismatch === true, '還原示範狀態失敗');
+});
+
 await test('★ 支部版面：旅側唔另設，各支部自家版面之後照抄（有接入位）', async () => {
   const d = S.load();
   for (const b of d.branches) assert(b.layout && b.layout.id, `${b.id} 冇版面欄`);

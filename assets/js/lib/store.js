@@ -9,7 +9,7 @@
 
 import { makeDemo } from './demo.js';
 import { deepClone, toast } from './util.js';
-import { defaultRankFor, gateOfLink } from './registry.js';
+import { defaultRankFor, gateOfLink, gateAllowsLocalLogin } from './registry.js';
 
 const K_DATA = 'troop.demo.db.v1';
 const K_SESSION = 'troop.session.v1';
@@ -142,6 +142,14 @@ export function setBranchGate(branchId, gate, { note = '', by = null, silent = f
     t.link.gateAt = at;
     t.link.gateNote = '';
     t.link.note = gate === 'open' ? '支部系統自己登入得（旅入口亦入得）' : '閂咗支部系統登入：只經旅入口';
+    /* 真模式：下游寫入會回 confirmed → 下游真相跟住旅側記錄走（示範：直接同步） */
+    const dn = (d.downstream || {})[branchId];
+    if (dn) { dn.localLogin = gate === 'open'; dn.escOpened = false; }
+    /* 旅側重新拍板 ＝ 逃生門嗰件事已經處理（留低紀錄，唔再標示 ⚠） */
+    if (t.link.esc) {
+      t.link.escAck = { at, by: u?.name || '', mode: gate === 'open' ? 'accept' : 'relock' };
+      t.link.esc = null;
+    }
   }, { markDirty: true, silent });
   return { ok: true, at, by: u?.name || '', result: res };
 }
@@ -150,6 +158,57 @@ export const branchGate = branchId => {
   const b = branchById(branchId);
   return b ? gateOfLink(b.link) : 'open';
 };
+
+/* ---------------- ★ 防死鎖：逃生門（單向） ---------------- */
+/** 逃生門鑰匙持有人 ＝ 該下游 Sheet／Apps Script 專案擁有者（旅側死咗都救得返嘅唯一人） */
+export const escOwner = branchId => load().downstream?.[branchId]?.escOwner || null;
+export function setEscOwner(branchId, { email = '', note = '' } = {}) {
+  const u = currentUser();
+  const at = nowStr();
+  if (!branchById(branchId)) return { ok: false, msg: '搵唔到呢個支部' };
+  if (!email.trim()) return { ok: false, msg: '要填專案擁有者嘅 Google 帳號' };
+  commit(d => {
+    d.downstream[branchId] = d.downstream[branchId] || {};
+    d.downstream[branchId].escOwner = { email: email.trim(), note: note.trim(), at, by: u?.name || '' };
+  }, { markDirty: true });
+  return { ok: true, at, email: email.trim() };
+}
+/** 本地逃生門紀錄（下游寫 ESC_LOG；旅側握手時讀返） */
+export const branchEscape = branchId => branchById(branchId)?.link?.esc || null;
+/** 上次已處理嘅逃生門（接受／再閂返） */
+export const branchEscapeAck = branchId => branchById(branchId)?.link?.escAck || null;
+/** 旅側記錄 vs 下游真相：唔一致 ＝ 有人用過逃生門（或者下游被改過） */
+export function gateMismatch(branchId) {
+  const b = branchById(branchId);
+  if (!b) return { mismatch: false, known: false };
+  const truth = load().downstream?.[branchId]?.localLogin;
+  const known = typeof truth === 'boolean';
+  return { mismatch: known && truth !== gateAllowsLocalLogin(gateOfLink(b.link)), known, truth };
+}
+/** 旅長拍板：accept＝接受本地解鎖（記錄改為開，唔發 sig：下游本身已經係開）；
+    relock＝再閂返（一樣行 sig setGate） */
+export function resolveEscape(branchId, mode = 'relock') {
+  const u = currentUser();
+  const at = nowStr();
+  if (mode !== 'accept') return setBranchGate(branchId, 'sig-only');
+  const b = branchById(branchId);
+  if (!b) return { ok: false, msg: '搵唔到呢個支部' };
+  if (!b.link?.esc) return { ok: false, msg: '冇待處理嘅本地解鎖' };
+  const res = commit(d => {
+    const t = d.branches.find(x => x.id === branchId);
+    t.link.gate = 'open';
+    t.link.localLogin = true;
+    t.link.state = 'yellow';
+    t.link.gateBy = u?.name || getSession()?.email || '';
+    t.link.gateAt = at;
+    t.link.note = '旅知悉本地解鎖並接受：兩條通道都開';
+    t.link.esc = null;
+    t.link.escAck = { at, by: u?.name || '', mode: 'accept' };
+    const dn = (d.downstream || {})[branchId];
+    if (dn) { dn.localLogin = true; dn.escOpened = false; }
+  }, { markDirty: true });
+  return { ok: true, at, by: u?.name || '', gate: 'open', result: res };
+}
 
 /** ★ 支部版面：各支部自家設計，之後照抄入嚟（旅側唔另設一套） */
 export const branchLayout = id => (id === 'troop' ? null : (branchById(id)?.layout || null));

@@ -65,7 +65,7 @@ export const DEMO_BRANCHES = [
     id: 'rs0082', code: '0082', name: '樂行童軍團', section: '樂行童軍', color: '#a8531f',
     youth: 11, adults: 3, founded: '2019',
     leader: '何家俊', leaderEmail: 'ho@demo.troop',
-    link: { state: 'green', purpose: 'roverbadge-troop-sig-v1', api: 'v1', gate: 'sig-only', localLogin: false, gateBy: '陳大文', gateAt: '2026-09-23 22:10', registeredAt: '2026-09-19', lastPing: '2026-09-25 07:02', backend: 'script.google.com/macros/s/AKfy…RS/exec', note: '閂咗支部系統登入：只經旅入口' },
+    link: { state: 'green', purpose: 'roverbadge-troop-sig-v1', api: 'v1', gate: 'sig-only', localLogin: false, gateBy: '陳大文', gateAt: '2026-09-23 22:10', registeredAt: '2026-09-19', lastPing: '2026-09-25 07:02', backend: 'script.google.com/macros/s/AKfy…RS/exec', note: '閂咗支部系統登入：只經旅入口', esc: { at: '2026-09-25 02:10', by: '曾國強（團長）', method: 'Apps Script 手動解鎖（unlockLocalLogin）', why: '旅側 GAS 停權維修中，活動日要開名單' } },
     progressSource: 'roverbadge', hasPortal: true, publicRank: 2,
     layout: { id: 'rover', name: '樂行版（自家設計）', from: 'rover_portal', state: 'copy-pending', note: '照抄' }
   }
@@ -329,7 +329,8 @@ export const DEMO_MODULES = {};   // 由 registry 預設填充，state 只存 ov
 /** 審計／操作紀錄 */
 export const DEMO_AUDIT = [
   { id: 'au-1', at: D(0) + ' 07:40', actor: '陳大文', role: '旅長', action: '測試下游連線', target: '深資童軍團（vs0082）', via: 'UI', detail: 'sig 驗證成功 · 12 read / 19 write action' },
-  { id: 'au-2', at: D(-1) + ' 21:12', actor: '陳大文', role: '旅長', action: '閂下游直接入口', target: '樂行童軍團（rs0082）', via: 'sig', detail: 'ALLOW_LOCAL_LOGIN=false（下游回報 confirmed）' },
+  { id: 'au-2', at: D(-1) + ' 21:12', actor: '陳大文', role: '旅長', action: '閂支部系統登入', target: '樂行童軍團（rs0082）', via: 'sig', detail: 'ALLOW_LOCAL_LOGIN=false（下游回報 confirmed）' },
+  { id: 'au-2b', at: D(0) + ' 02:10', actor: '曾國強', role: '團長', action: '本地解鎖（逃生門）', target: '樂行童軍團（rs0082）', via: 'Apps Script', detail: '刪 ALLOW_LOCAL_LOGIN（下游自己寫 ESC_LOG；旅側下次握手見到唔一致）' },
   { id: 'au-3', at: D(-1) + ' 18:31', actor: '（申請人）林美好', role: '家長', action: '提交開戶申請', target: '家長帳號', via: '公開頁', detail: '待該團領袖確認子女綁定' },
   { id: 'au-4', at: D(-2) + ' 15:02', actor: '李美儀', role: 'coach', identity: '', action: '提交跨團幫手申請', target: '小童軍團', via: 'UI', detail: '等目標團領袖批（未生效）' },
   { id: 'au-5', at: D(-3) + ' 21:15', actor: '張偉業', role: '支部領袖', action: '提交財務摘要', target: '深資童軍團 2026-09', via: '支部系統', detail: '旅已收（accepted）' },
@@ -349,11 +350,11 @@ export const DEMO_ACCESS_LOG = [
 
 /** 下游接駁（詳情頁用）：每個下游嘅登記資料（示範用遮罩值） */
 export const DEMO_DOWNSTREAM_DETAIL = {
-  vs0082: { url: 'https://script.google.com/macros/s/AKfyc…VS/exec', keyMask: 'vs82_••••••••••••7f3a', api: 'v1', purpose: 'vsbadge-troop-sig-v1', readActions: 12, writeActions: 19, superVerify: 'https://vsbadge.vercel.app/api/super', portalOrigin: 'https://vsbadge.vercel.app' },
-  sc0082: { url: 'https://script.google.com/macros/s/AKfy…SC/exec', keyMask: 'sc82_••••••••••••2b8d', api: 'v1', purpose: 'scportal-troop-sig-v1', readActions: 11, writeActions: 16, superVerify: '（待補）', portalOrigin: 'https://sc-portal.vercel.app' },
-  cs0082: { url: 'https://script.google.com/macros/s/AKfy…CS/exec', keyMask: 'cs82_••••••••••••9a1c', api: 'v1', purpose: 'cubsbadge-troop-sig-v1', readActions: 12, writeActions: 19, superVerify: '（零回打版）', portalOrigin: 'https://cubsbadge.vercel.app' },
-  rs0082: { url: 'https://script.google.com/macros/s/AKfy…RS/exec', keyMask: 'rs82_••••••••••••3e5g', api: 'v1', purpose: 'roverbadge-troop-sig-v1', readActions: 12, writeActions: 19, superVerify: 'https://roverbadge.vercel.app/api/super', portalOrigin: 'https://roverbadge.vercel.app' },
-  gs0082: { url: '', keyMask: '', api: '', purpose: '', readActions: 0, writeActions: 0, superVerify: '', portalOrigin: '' }
+  vs0082: { url: 'https://script.google.com/macros/s/AKfyc…VS/exec', keyMask: 'vs82_••••••••••••7f3a', api: 'v1', purpose: 'vsbadge-troop-sig-v1', readActions: 12, writeActions: 19, superVerify: 'https://vsbadge.vercel.app/api/super', portalOrigin: 'https://vsbadge.vercel.app', localLogin: false, escOpened: false, escOwner: { email: 'vs82.owner@gmail.com', note: '張偉業（深資團長）· 專案擁有者', at: '2026-09-18 16:20', by: '陳大文' } },
+  sc0082: { url: 'https://script.google.com/macros/s/AKfy…SC/exec', keyMask: 'sc82_••••••••••••2b8d', api: 'v1', purpose: 'scportal-troop-sig-v1', readActions: 11, writeActions: 16, superVerify: '（待補）', portalOrigin: 'https://sc-portal.vercel.app', localLogin: true, escOpened: false, escOwner: { email: 'sc82.owner@gmail.com', note: '李美儀（童軍團長）· 專案擁有者', at: '2026-09-22 10:15', by: '陳大文' } },
+  cs0082: { url: 'https://script.google.com/macros/s/AKfy…CS/exec', keyMask: 'cs82_••••••••••••9a1c', api: 'v1', purpose: 'cubsbadge-troop-sig-v1', readActions: 12, writeActions: 19, superVerify: '（零回打版）', portalOrigin: 'https://cubsbadge.vercel.app', localLogin: false, escOpened: false, escOwner: { email: 'cs82.owner@gmail.com', note: '黃嘉豪（小童軍團長）· 專案擁有者', at: '2026-09-20 11:05', by: '陳大文' } },
+  rs0082: { url: 'https://script.google.com/macros/s/AKfy…RS/exec', keyMask: 'rs82_••••••••••••3e5g', api: 'v1', purpose: 'roverbadge-troop-sig-v1', readActions: 12, writeActions: 19, superVerify: 'https://roverbadge.vercel.app/api/super', portalOrigin: 'https://roverbadge.vercel.app', localLogin: true, escOpened: true, escOwner: { email: 'rs82.owner@gmail.com', note: '曾國強（樂行童軍團長）· 專案擁有者', at: '2026-09-19 09:30', by: '陳大文' } },
+  gs0082: { url: '', keyMask: '', api: '', purpose: '', readActions: 0, writeActions: 0, superVerify: '', portalOrigin: '', escOwner: null }
 };
 
 /** 用戶訂閱（個人化訂閱 ★）：支部 × 分類，存本機 */
