@@ -101,7 +101,7 @@ export function renderDetail(el, { id }, query = {}) {
       ['旅內顯示名', esc(b.name)],
       ['進度來源', b.progressSource ? `<span class="mono">${esc(b.progressSource)}</span>` : '未接'],
       ['公開資料等級', `${visName(b.publicRank)}（${b.publicRank}）`],
-      ['支部系統閘', (() => { const gm = gateMeta(gateOfLink(b.link)); return `<span class="tag ${gm.tone} sm">${gm.label}</span>${b.link.gateBy ? ` <span class="xs faint">${esc(b.link.gateBy)} · ${esc(b.link.gateAt || '')}</span>` : ''}`; })()],
+      ['支部系統登入', (() => { const gm = gateMeta(gateOfLink(b.link)); return `<span class="tag ${gm.tone} sm">${gm.label}</span>${b.link.gateBy ? ` <span class="xs faint">${esc(b.link.gateBy)} · ${esc(b.link.gateAt || '')}</span>` : ''}`; })()],
       ['支部版面', b.layout ? `${esc(b.layout.name)} <span class="tag ${b.layout.state === 'generic' ? 'n' : 'y'} sm">${b.layout.state === 'generic' ? '通用（未設計）' : '待照抄'}</span>` : '未設定']
     ]) })}
       ${card({ title: '健康狀態', body: `
@@ -122,7 +122,7 @@ export function renderDetail(el, { id }, query = {}) {
         head: ['項目', '狀態'], rows: [
           { cells: ['支部系統（團）', b.link.state === 'red' ? '<span class="tag r">未起系統</span>' : '<span class="tag g">已登記</span>'] },
           { cells: ['進度 leaf', b.progressSource ? `<span class="tag g">已接駁（${esc(b.progressSource)}）</span>` : '<span class="tag n">未接</span>'] },
-          { cells: ['支部系統閘', (() => { const g = gateOfLink(b.link), gm = gateMeta(g); return `<span class="tag ${gm.tone}">${gm.label}</span>${g === 'closed' && b.link.gateNote ? `<div class="xs faint">${esc(b.link.gateNote)}</div>` : ''}`; })()] },
+          { cells: ['支部系統自己登入', (() => { const gm = gateMeta(gateOfLink(b.link)); return `<span class="tag ${gm.tone}">${gm.label}</span>`; })()] },
           { cells: ['財務提交（2026-09）', fin ? `<span class="tag ${fin.state === 'accepted' ? 'g' : 'y'}">${esc(fin.state)}</span>` : '<span class="tag n">—</span>'] },
           { cells: ['公開資料', `${visName(b.publicRank)}`] },
           { cells: ['支部版面', b.layout ? (b.layout.state === 'generic' ? '<span class="tag n">通用（未設計）</span>' : `<span class="tag y">${esc(b.layout.name)}</span><div class="xs faint">之後照抄（旅側唔另設）</div>`) : '—'] }
@@ -173,31 +173,26 @@ export function renderDetail(el, { id }, query = {}) {
     ${(() => {
       const gate = gateOfLink(b.link);
       const gm = gateMeta(gate);
-      const closed = gate === 'closed';
       const canEdit = can(role, 'branch_link_edit');
-      const red = b.link.state === 'red' && gate !== 'closed';
+      const red = b.link.state === 'red';
       return card({
-        title: '★ 支部系統閘（被關 / 開放）', sub: '支部系統嗰邊冇掣 —— 呢個閘由旅側登記版面控制',
+        title: '★ 支部系統登入通道（閂／開）', sub: '支部系統嗰邊冇掣 —— 呢個掣喺旅側',
         body: `
-        ${notice('支部系統會實作「被關」功能（本地直接入口一律唔畀入），但<b>嗰邊唔會有按鈕</b>：'
-          + '閂／開由<b>旅側呢一頁</b>控制 —— 旅長撳一下，旅就用 <span class="mono">sig</span> 打落該團（write action '
-          + '<span class="mono">setGate</span>），下游寫入並回 <span class="mono">confirmed</span>。', 'info')}
+        ${notice('只有一件事：<b>旅決定閂唔閂「支部系統自己登入」嗰條通道</b>。閂咗之後，支部系統<b>就算已登記、經 sig 睇到張 SHEET，都唔畀佢自己登入</b>（回 403 <span class="mono">upstream_only:true</span>）—— 出入只經旅入口。<br>兩邊都開都完全得（有時反而方便）；冇話邊個係「標準」，純粹係旅嘅決定。', 'info')}
         <div class="grid g3 mt-12">
-          ${stat({ k: '而家嘅閘', v: gm.label, tone: gm.tone, hint: gm.desc })}
+          ${stat({ k: '而家', v: gm.label, tone: gm.tone, hint: gm.desc })}
           ${stat({ k: '上次改動', v: b.link.gateBy || '—', hint: b.link.gateAt || '未改過' })}
-          ${stat({ k: '下游確認', v: red ? '未登記（改唔到）' : 'confirmed', tone: red ? 'danger' : 'ok', hint: red ? '先登記下游先有得控制' : 'fail-closed：讀唔到就當閂' })}
+          ${stat({ k: '下游確認', v: red ? '未登記（改唔到）' : 'confirmed', tone: red ? 'danger' : 'ok', hint: red ? '先登記下游先控制得到' : 'fail-closed：讀唔到就當閂咗' })}
         </div>
-        ${closed ? notice(`被關原因：<b>${esc(b.link.gateNote || '（未寫）')}</b> —— 呢段時間連旅入口都擋（唔會扮入到）。`, 'err') : ''}
-        ${red && !closed ? notice('未登記下游：呢個閘改唔到（唔會當成功）。先撳「改登記」填 URL ＋ KEY ＋ sig 用途。', 'warn') : ''}
+        ${red ? notice('未登記下游：呢個掣改唔到（唔會當成功）。先撳「改登記」填 URL ＋ KEY ＋ sig 用途。', 'warn') : ''}
         ${canEdit ? `<div class="btn-row mt-12">
-          <button class="btn sm ${gate === 'open' ? 'primary' : ''}" data-gate="${b.id}" data-g="open" ${gate === 'open' || red ? 'disabled' : ''}>${icon('unlock', 13)} 開放（過渡期）</button>
-          <button class="btn sm ${gate === 'sig-only' ? 'primary' : ''}" data-gate="${b.id}" data-g="sig-only" ${gate === 'sig-only' || red ? 'disabled' : ''}>${icon('lock', 13)} 閂口（只收 sig）</button>
-          <button class="btn sm danger" data-gate="${b.id}" data-g="closed" ${closed ? 'disabled' : ''}>${icon('power', 13)} 被關（維修／停用）</button>
-        </div>` : `<div class="xs faint mt-12">你嘅角色唔可以改閘（要 <span class="mono">branch_link_edit</span> ＝ 旅長）。</div>`}
+          <button class="btn sm ${gate === 'open' ? 'primary' : ''}" data-gate="${b.id}" data-g="open" ${gate === 'open' || red ? 'disabled' : ''}>${icon('unlock', 13)} 開返支部系統登入</button>
+          <button class="btn sm ${gate === 'sig-only' ? 'primary' : ''}" data-gate="${b.id}" data-g="sig-only" ${gate === 'sig-only' || red ? 'disabled' : ''}>${icon('lock', 13)} 閂支部系統登入（只經旅入口）</button>
+        </div>` : `<div class="xs faint mt-12">你嘅角色唔可以改（要 <span class="mono">branch_link_edit</span> ＝ 旅長）。</div>`}
         <div class="mono-block mt-12">POST ${esc(dd.url || '（未登記）')}
-{ action:"setGate", gate:"sig-only"|"open"|"closed", note:"…", sig:…, sig_ts:…, sig_nonce:… }
-→ { success:true, data:{ unit, localLogin:false, gate:"sig-only", confirmed:true } }</div>
-        <div class="xs faint mt-8">下游寫入 · 上游唔會代寫 · 每次改動入審計（邊個／幾時／原因）</div>
+{ action:"setGate", gate:"open"|"sig-only", sig:…, sig_ts:…, sig_nonce:… }
+→ { success:true, data:{ unit, localLogin:true|false, confirmed:true } }</div>
+        <div class="xs faint mt-8">下游寫入 · 上游唔會代寫 · 每次改動入審計（邊個／幾時）</div>
         `,
         ...(canEdit ? {} : {})
       });
@@ -341,7 +336,7 @@ export function openEnterBranch(id) {
       cons: ['寫入要另計權限', '閂口後完全唔通', '等於繞過上游控制'],
       url: dd.url ? `POST /api/troop → ${dd.url}` : '（未登記）',
       status: gateOfLink(b.link) === 'open' ? 'y' : 'r',
-      statusText: gateOfLink(b.link) === 'open' ? '本地入口仍開（過渡可用）' : '本地入口已閂／被關 —— 呢條路唔通'
+      statusText: gateOfLink(b.link) === 'open' ? '支部系統自己登入得（旅容許）' : '旅閂咗支部系統登入 —— 呢條路唔通'
     }
   };
 
@@ -397,62 +392,35 @@ function pingBranch(id) {
   }, 600);
 }
 
-/* ★ 支部系統閘：三態控制（被關／閂口／開放）—— 旅側唯一入口 */
+/* ★ 支部系統登入通道：兩個狀態，旅側唯一控制面 */
 async function setBranchGateUI(id, gate) {
   const b = S.branchById(id);
   const { confirmDlg } = await import('../lib/util.js');
-  const cur = gateOfLink(b.link);
-  if (cur === gate) return;
+  if (gateOfLink(b.link) === gate) return;
   const copy = {
     open: {
-      title: '開放支部系統（過渡期）',
-      msg: `後果：<b>本地直接入得</b>（前台可以直接登入呢個下游），旅入口亦入得。<br>通常只喺「搬數／測試」期間開，做完就閂。`,
-      ok: '開放', danger: false
+      title: '開返「支部系統自己登入」',
+      msg: `之後：支部系統前台可以自己登入呢個下游（旅入口亦照入）。<br>旅嘅決定 —— 兩邊都開都得，冇話邊個先啱。`,
+      ok: '開返', danger: false
     },
     'sig-only': {
-      title: '閂口（只收上游 sig）',
-      msg: `後果：<b>本地直接登入一律唔畀入</b>；只有旅經 <span class="mono">sig</span> 入得。<div class="mt-8">• 已搬數、已測連線？<br>• 每個下游至少留一個本地領袖戶＋SUPER 作災難恢復。</div>`,
-      ok: '閂口', danger: true
-    },
-    closed: {
-      title: '被關（維修／停用）',
-      msg: `後果：<b>一律唔入得</b> —— 連旅入口都暫時擋（成員、領袖、家長全部）。請寫原因，會顯示喺旅閘同呢一頁。`,
-      ok: '確認被關', danger: true, needNote: true
+      title: '閂「支部系統自己登入」',
+      msg: `之後：支部系統<b>唔可以自己登入</b>（本地直接登入回 403）—— <b>就算已登記、經 sig 睇到張 SHEET，都唔畀佢入</b>；出入只經旅入口。<div class="mt-8">• 下游唔會收到本地登入請求（前端路徑已由旅接手）<br>• 每個下游至少留一個本地領袖戶＋SUPER 作災難恢復</div>`,
+      ok: '閂咗佢', danger: true
     }
   }[gate];
-  let note = '';
-  if (copy.needNote) {
-    const m = modal({
-      title: copy.title,
-      body: `<div class="sm">${copy.msg}</div>
-      <label class="f mt-12"><span class="lb">原因（會顯示畀所有人睇）</span><input type="text" id="gate-note" placeholder="例：團部裝修，11/1 檢視後再開"></label>
-      <div class="xs faint">示範模式：唔會真係打 sig；真模式會寫入該團（<span class="mono">setGate</span>）＋旅審計。</div>`,
-      footer: `<button class="btn" data-close>取消</button><button class="btn danger" data-save>${copy.ok}</button>`
-    });
-    m.el.querySelector('[data-close]').onclick = m.close;
-    m.el.querySelector('[data-save]').onclick = async () => {
-      note = m.el.querySelector('#gate-note').value.trim();
-      if (!note) return toast('「被關」要寫原因', 'err');
-      m.close();
-      await applyGate(id, gate, note);
-    };
-    return;
-  }
-  if (await confirmDlg({ title: copy.title, message: copy.msg, ok: copy.ok, danger: copy.danger })) await applyGate(id, gate, '');
+  if (await confirmDlg({ title: copy.title, message: copy.msg, ok: copy.ok, danger: copy.danger })) await applyGate(id, gate);
 }
 
-async function applyGate(id, gate, note) {
+async function applyGate(id, gate) {
   const b = S.branchById(id);
-  const r = S.setBranchGate(id, gate, { note });
+  const r = S.setBranchGate(id, gate);
   if (!r.ok) { toast(r.msg, 'err', '', null, 6000); return; }   // 誠實失敗：唔會當成功
-  S.audit(
-    gate === 'closed' ? '被關（支部系統閘）' : gate === 'sig-only' ? '閂口（支部系統閘）' : '開放（支部系統閘）',
-    `${b.name}（${id}）`,
-    `gate=${gate}${note ? ' · 原因：' + note : ''}（示範：唔會真發 sig；真模式＝下游 setGate 回 confirmed）`, 'sig'
-  );
-  toast(gate === 'closed' ? '已送 sig：下游回 confirmed（被關）'
-    : gate === 'sig-only' ? '已送 sig：下游回 confirmed（只收 sig）'
-      : '已送 sig：下游回 confirmed（開放）', gate === 'closed' ? 'warn' : 'ok', '', null, 5000);
+  S.audit(gate === 'sig-only' ? '閂支部系統登入' : '開返支部系統登入', `${b.name}（${id}）`,
+    `gate=${gate}（示範：唔會真發 sig；真模式＝下游 setGate 回 confirmed）`, 'sig');
+  toast(gate === 'sig-only'
+    ? '已送 sig：下游回 confirmed —— 支部系統唔可以自己登入'
+    : '已送 sig：下游回 confirmed —— 支部系統可以自己登入', 'ok', '', null, 5000);
   go('branch/' + id + '?tab=link');
 }
 

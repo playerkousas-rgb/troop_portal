@@ -201,7 +201,7 @@ function renderGate() {
   if (step === 'role') {
     const st = d.branches.map(b => ({ b, st: branchEntryStatus(b.id) }));
     const ready = st.filter(x => x.st.ok).length;
-    const gated = st.filter(x => x.st.gate === 'closed').length;
+    const chanOff = st.filter(x => x.st.gate === 'sig-only').length;
     gate.innerHTML = `
       <div class="gate-hero">
         <div class="logo" style="width:48px;height:48px;font-size:22px">82</div>
@@ -237,7 +237,7 @@ function renderGate() {
           <div class="xs faint mt-8">公開頁同分享連結只放行你設定咗「等級 0」嘅資料；QR／連結永不帶 key。</div>
         </div>
       </div>
-      <div class="mt-12">${noticeBox(`支部有人入得到：<b>${ready}</b> / ${d.branches.length} 團。未入得到嘅：（一）「未登記下游 SHEET」—— 旅讀唔到該團資料，所以由旅窗口入唔到（唔係壞咗，係未登記）；（二）「被關」—— 該支部系統暫時全關（${gated} 團），連旅入口都擋。`)}</div>
+      <div class="mt-12">${noticeBox(`支部有人入得到：<b>${ready}</b> / ${d.branches.length} 團。未入得到嘅係「未登記下游 SHEET」—— 旅讀唔到該團資料，所以由旅窗口入唔到（唔係壞咗，係未登記）。<br>其中 <b>${chanOff}</b> 團旅閂咗「支部系統自己登入」：唔影響旅入口，你照樣入得自己支部。`)}</div>
       <div class="center mt-12"><button class="btn" id="back">${icon('arrowL', 14)} 返回旅閘</button></div>`;
     gate.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => {
       const v = b.dataset.go;
@@ -265,10 +265,10 @@ function renderGate() {
             <span class="emblem" style="background:${b.color}22;color:${b.color}">${esc(String(b.section || b.name).slice(0, 2))}</span>
             <span class="grow">
               <span class="bold">${esc(b.name)}</span>
-              ${(() => { const gm = gateMeta(st.gate || gateOfLink(b.link)); return `<span class="tag ${gm.tone} sm">${gm.label}</span>`; })()}
-              <span class="tag ${st.state === 'green' ? 'g' : st.state === 'yellow' ? 'y' : 'r'} sm">${st.state === 'green' ? '已接駁' : st.state === 'yellow' ? '已登記 · 未閂口' : (st.gate === 'closed' ? '被關' : '未登記下游')}</span>
+              <span class="tag ${st.state === 'green' ? 'g' : st.state === 'yellow' ? 'y' : 'r'} sm">${st.state === 'green' ? '已接駁' : st.state === 'yellow' ? '兩條通道都開' : '未登記下游'}</span>
+              ${(() => { const gm = gateMeta(st.gate || gateOfLink(b.link)); return st.state === 'red' ? '' : `<span class="tag ${gm.tone} sm">${gm.label}</span>`; })()}
               <br><span class="xs faint">${esc(b.section)} · 名冊 ${cnt} 筆（示範）${b.link?.testedAt ? ' · 上次測試 ' + esc(b.link.testedAt) : ''}</span>
-              ${st.ok ? '' : `<div class="xs mt-8" style="color:var(--danger)">${esc(st.msg)}${st.gate === 'closed' ? '（唔會扮入到）' : ''}</div>`}
+              ${st.ok ? '' : `<div class="xs mt-8" style="color:var(--danger)">${esc(st.msg)}</div>`}
             </span>
             <span class="btn-row">
               ${st.ok
@@ -278,7 +278,7 @@ function renderGate() {
           </div>`;
         }).join('')}
       </div>
-      <div class="mt-12">${noticeBox('★ 揀咗團、登入之後，就直接入到你支部嘅世界（旅入口＝支部入口）。<br>「被關」嘅團：支部系統暫時全關（例如維修），連旅入口都擋 —— 唔會扮入到；原因由旅長喺「接駁與登記」寫。')}</div>
+      <div class="mt-12">${noticeBox('★ 揀咗團、登入之後，就直接入到你支部嘅世界（旅入口＝支部入口）。<br>旅側可以閂咗「支部系統自己登入」嗰條通道 —— 唔影響旅入口：你照樣入得自己支部。')}</div>
       <div class="center mt-12"><button class="btn" id="back">${icon('arrowL', 14)} 返上一頁</button></div>`;
     gate.querySelectorAll('[data-pick]').forEach(b => b.addEventListener('click', () => gateGo('login', 'path=branch&b=' + b.dataset.pick + (ymis ? '&ymis=' + encodeURIComponent(ymis) : ''))));
     gate.querySelectorAll('[data-why]').forEach(b => b.addEventListener('click', () => {
@@ -365,13 +365,10 @@ function renderBranchLogin(gate, q) {
   const st = branchEntryStatus(bid);
   const gate2 = st.gate || gateOfLink(b.link);
   if (!st.ok) {
-    const closed = gate2 === 'closed';
     gate.innerHTML = `<div class="login-wrap"><div class="card">
-      <h2 class="mt-0">${esc(b.name)} ${closed ? '被關' : '入唔到'}</h2>
+      <h2 class="mt-0">${esc(b.name)} 入唔到</h2>
       <div class="err">${esc(st.msg)}</div>
-      ${closed
-      ? noticeBox(`被關係<b>旅側控制嘅閘</b>（支部系統嗰邊冇掣）：旅長喺「支部 → 揀該團 → 接駁與登記 → 支部系統閘」可以開放返。<br>被關期間：唔會收本地登入、唔會扮有資料 —— 連旅入口都擋。`)
-      : noticeBox('旅長做一步就得：支部 → 揀該團 →「接駁與登記」填 URL ＋ KEY ＋ sig 用途 → 測試連線（綠燈）。')}
+      ${noticeBox('旅長做一步就得：支部 → 揀該團 →「接駁與登記」填 URL ＋ KEY ＋ sig 用途 → 測試連線（綠燈）。')}
       <div class="btn-row mt-12"><button class="btn" id="back">揀第二個團</button><a class="btn primary" href="index.html?step=login&path=staff">我係旅長／教練員</a></div>
     </div></div>`;
     gate.querySelector('#back').onclick = () => gateGo('branch');
@@ -384,7 +381,7 @@ function renderBranchLogin(gate, q) {
         <div class="logo" style="width:48px;height:48px;font-size:20px;background:${b.color}">${esc(String(b.section || b.name).slice(0, 2))}</div>
         <h1 style="font-size:22px">${esc(b.name)}</h1>
         <div class="faint sm">${esc(b.section)} · <span class="tag ${st.state === 'green' ? 'g' : 'y'} sm">${st.state === 'green' ? '已接駁' : '已登記 · 未閂口'}</span>
-          <span class="tag ${gateMeta(gate2).tone} sm">閘：${gateMeta(gate2).label}</span></div>
+          <span class="tag ${gateMeta(gate2).tone} sm">${gateMeta(gate2).label}</span></div>
       </div>
       <div class="card pad-l">
         ${noticeBox('★ <b>旅入口＝你嘅支部入口</b>：揀咗團，登入之後就直接入到<b>你支部個世界</b>（名冊、自己團通告、活動、物資），只係多咗「其他支部 share 俾你」嘅嘢 —— 唔使你另開一個支部系統、亦唔使再登多次。示範模式用以下帳號試身份差異：')}

@@ -119,8 +119,9 @@ export const visibleUsers = () => users().filter(u => !u.hidden);
 /** 支部人員（團長／副團長／成員）嘅所屬支部 */
 export const myBranchId = () => session?.branchId || null;
 export const myBranch = () => (session?.branchId ? branchById(session.branchId) : null);
-/** ★ 支部系統閘（open／sig-only／closed）—— 由旅側登記版面控制；支部系統嗰邊冇掣。
-    真模式：呢一步係 sig write action `setGate`（下游寫入 ALLOW_LOCAL_LOGIN／GATE，回 confirmed）。
+/** ★ 支部系統登入通道（open／sig-only）—— 由旅側登記版面控制；支部系統嗰邊冇掣。
+    閂咗＝支部系統唔可以自己登入（本地 403），就算已登記、睇到張 SHEET 都唔畀入；只經旅入口。
+    真模式：呢一步係 sig write action `setGate`（下游寫入 ALLOW_LOCAL_LOGIN，回 confirmed）。
     fail-closed：下游未登記（紅燈）＝ 改唔到，亦唔會當成功。 */
 export function setBranchGate(branchId, gate, { note = '', by = null, silent = false } = {}) {
   const u = by || currentUser();
@@ -136,14 +137,11 @@ export function setBranchGate(branchId, gate, { note = '', by = null, silent = f
     if (!t || !t.link) return;
     t.link.gate = gate;
     t.link.localLogin = gate === 'open';           // 舊欄位同步（向下兼容）
-    /* 灯跟「接駁健康度」：閂口／被關都唔應該當未接駁（被關係一個獨立狀態，用 gate 表示） */
-    t.link.state = gate === 'closed' ? (t.link.registeredAt ? 'green' : 'red') : (gate === 'open' ? 'yellow' : 'green');
+    t.link.state = gate === 'open' ? 'yellow' : 'green';
     t.link.gateBy = u?.name || getSession()?.email || '';
     t.link.gateAt = at;
-    t.link.gateNote = gate === 'closed' ? (note || '') : '';
-    t.link.note = gate === 'open' ? '本地入口開放（過渡期）'
-      : gate === 'closed' ? `被關：${note || '（未寫原因）'}`
-        : '已接駁，本地入口已閂（只收 sig）';
+    t.link.gateNote = '';
+    t.link.note = gate === 'open' ? '支部系統自己登入得（旅入口亦入得）' : '閂咗支部系統登入：只經旅入口';
   }, { markDirty: true, silent });
   return { ok: true, at, by: u?.name || '', result: res };
 }
@@ -279,7 +277,7 @@ export function counters() {
     usersPending: (d.users || []).filter(u => u.status === 'pending' && !u.hidden).length,
     sharesPending: pendingShares().length,
     sharesSentPending: sharesFromMe().filter(s => s.state === 'pending').length,
-    systemAlerts: (d.branches || []).filter(b => b.link.state !== 'green' || gateOfLink(b.link) === 'closed').length + (d.backend?.broken?.length || 0)
+    systemAlerts: (d.branches || []).filter(b => b.link.state !== 'green').length + (d.backend?.broken?.length || 0)
   };
 }
 

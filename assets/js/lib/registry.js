@@ -320,24 +320,23 @@ export const can = (role, perm) => (PERMS[role] || []).includes(perm);
 export const canDecideShare = (role, rank = 0) => ['chief', 'coach'].includes(role) || Number(rank) >= 3;
 
 /* ============================================================
-   支部系統閘（★ 用戶定案 2026-09-25）
+   支部系統登入通道（★ 用戶定案 2026-09-25 修訂）
    ------------------------------------------------------------
-   支部系統會實作「被關」，但**嗰邊冇掣** —— 所以閂／唔閂由**旅側登記版面**控制。
-   三態（fail-closed：讀唔到下游 ＝ 當閂，唔會當開）：
-     open     開放：本地直接入得（過渡期用；黃燈）
-     sig-only 閂口：只收上游 sig，旅入口照入（完成後嘅標準狀態；綠燈）
-     closed   被關：一律唔入得（維修／停用）—— 連旅入口都暫時擋，要寫原因（紅燈）
+   只有一件事：**旅決定閂唔閂「支部系統自己登入」嗰條通道**。
+   閂咗之後：就算該支部系統已登記、經 sig 睇到張 SHEET，前端都唔畀佢自己登入
+             （本地直接登入回 403 upstream_only:true）—— 出入只經旅入口。
+   冇「被關（連旅入口都擋）」呢個狀態；亦冇「一定要閂」嘅標準狀態：
+   **兩邊都入得都可以**，純粹係旅嘅決定。
    ============================================================ */
 export const GATE_STATES = {
-  open: { id: 'open', label: '開放', tone: 'y', desc: '本地直接入得（過渡期）；旅入口照入' },
-  'sig-only': { id: 'sig-only', label: '閂口（只收 sig）', tone: 'g', desc: '前端直接登入已閂；只有旅經 sig 入得' },
-  closed: { id: 'closed', label: '被關（維修／停用）', tone: 'r', desc: '一律唔入得 —— 連旅入口都暫時擋' }
+  open: { id: 'open', label: '支部系統入得', tone: 'y', desc: '支部系統自己登入得，旅入口亦入得（兩條通道都開）' },
+  'sig-only': { id: 'sig-only', label: '閂咗支部系統登入', tone: 'g', desc: '支部系統唔可以自己登入（403；就算睇到張 SHEET 都唔畀入）—— 只經旅入口' }
 };
 export const gateMeta = g => GATE_STATES[g] || GATE_STATES.open;
-/** 由舊欄位推返閘狀態（舊資料只有 localLogin） */
-export const gateOfLink = link => link?.gate || (link?.localLogin ? 'open' : 'sig-only');
-/** 呢個閘狀態下，旅入口／本地入口仲入唔入得 */
-export const gateAllowsEntry = g => g !== 'closed';
+/** 由舊欄位推返狀態（舊資料只有 localLogin） */
+export const gateOfLink = link => (GATE_STATES[link?.gate] ? link.gate : (link?.localLogin ? 'open' : 'sig-only'));
+/** 該狀態下，支部系統本地入口仲入唔入得 */
+export const gateAllowsLocalLogin = g => g === 'open';
 
 /** ★ 分享種類：只做兩樣（2026-09-25 用戶定案）—— 通告 ＋ 活動（行事曆）
     其他種類（物資／進度／相簿／教材）留住個 kind 欄，但 UI 唔開，之後先加。 */

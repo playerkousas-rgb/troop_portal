@@ -153,7 +153,7 @@ function renderMemberDash(el) {
     ...(s.title ? [{ k: '職稱', v: esc(s.title) }] : []),
     { k: '年齡組', v: s.ageGroup === 'adult' ? '18+' : '未夠 18', tone: s.ageGroup === 'adult' ? 'ok' : 'warn' },
     { k: '支部接駁', v: st.state === 'green' ? '綠' : st.state === 'yellow' ? '黃' : '紅', tone: st.state === 'green' ? 'ok' : st.state === 'yellow' ? 'warn' : 'danger' },
-    { k: '支部系統閘', v: gateMeta(st.gate || S.branchGate(s.branchId)).label, tone: gateMeta(st.gate || S.branchGate(s.branchId)).tone },
+    { k: '支部系統登入', v: gateMeta(st.gate || S.branchGate(s.branchId)).label, tone: gateMeta(st.gate || S.branchGate(s.branchId)).tone },
     { k: '待接收分享', v: pend.length, tone: pend.length ? 'warn' : 'ok' }
   ])}
   ${notice(st.ok ? esc(st.note) : esc(st.msg), st.ok ? (st.state === 'green' ? 'ok' : 'warn') : 'err')}

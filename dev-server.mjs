@@ -110,6 +110,6 @@ server.listen(PORT, HOST, () => {
                 sc-cpl@demo.troop（副隊長·未夠 18）／sc-scout@demo.troop（團員·18+）
                 ← 支部人員入之前要先揀團；登入後直接入自己支部（旅入口＝支部入口）
   超管（隱藏）  index.html?step=super  或旅閘撳 ⚜ 五下 → super@platform.local
-  支部系統閘    旅長 → 支部 → 揀團 →「接駁與登記」→ 開放／閂口／被關（樂行童軍團示範「被關」）`);
+  支部系統登入通道  旅長 → 支部 → 揀團 →「接駁與登記」→ 開／閂（閂咗＝支部系統唔可以自己登入）`);
   console.log(`/api/* 暫時回 501（UI 先行，後端未實作）\n`);
 });
