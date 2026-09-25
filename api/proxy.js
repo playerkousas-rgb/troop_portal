@@ -27,7 +27,7 @@ export const GAS_WHITELIST = [
   'createInvite', 'listInvites', 'revokeInvite',
   'getDownstreams', 'registerDownstream', 'testDownstream', 'updateDownstream', 'removeDownstream',
   'setLocalLogin', 'getLoginMode', 'getLinkState', 'listModules', 'setModule',
-  'getSummary', 'getAuditLog', 'getAccessLog', 'saveAudit', 'logAccess',
+  'getSummary', 'getAuditLog', 'getAccessLog', 'saveAudit', 'logAccess', 'getVersion',
   /* P1：支部狀態／分享／求救／內容寫入 */
   'registry', 'saveShare', 'saveRescue', 'getTombstones',
   /* P2：批核（開戶申請／申報）＋申請模式 */

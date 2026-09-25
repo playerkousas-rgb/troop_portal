@@ -99,14 +99,17 @@ export function applyDecisions(rows = [], asks = [], decisions = {}) {
  *   mode='batch'（無人看場）→ 同格衝突 serverTime 新者勝，回 overwrote 留底
  * @returns { ok, code?, light, asks?, conflicts?, overwrote?, wrote?, queued? }
  */
-export async function syncNow({ api = API, mode = 'ask', tables = null, decisions = null } = {}) {
+export async function syncNow({ api = API, mode = 'ask', tables = null, decisions = null, _retried = false } = {}) {
   if (!isLive()) return { ok: false, code: 'mock', light: light() };          // 鐵律：示範零 fetch
   const st = state();
   const mine = tables || API.changedTables();
 
-  const remote = await safeCall(() => api.gasAction('load', {}), 'load');
+  /* 讀後端（只讀要寫嘅表）—— loadTables 會回 server 版本，記住做 baseVersion */
+  const keys = Object.keys(mine);
+  const remote = await safeCall(
+    () => (api.loadTables ? api.loadTables(keys) : api.gasAction('loadTables', { tables: keys })), 'load');
   if (!remote.ok) return failSave(remote, mine, 'load');
-  const theirs = remote.data?.tables || remote.data?.data || {};
+  const theirs = remote.data?.data || remote.data?.tables || {};
   const base = st.base || {};
 
   const merged = {}, asks = [], overwrote = [], picked = { mine: 0, theirs: 0 };
@@ -141,8 +144,16 @@ export async function syncNow({ api = API, mode = 'ask', tables = null, decision
   }
   Object.keys(merged).forEach(k => { if (merged[k] === null) delete merged[k]; });
 
-  const wrote = await withRetry(() => safeCall(() => api.saveTables(merged), 'save'), { onRetry: n => store({ failing: n }) });
-  if (!wrote.ok) return failSave(wrote, merged, 'save');
+  /* ★ 樂觀鎖：連 baseVersion 一齊交俾 GAS —— 對唔上就係「有人搶先寫」，GAS 唔會覆蓋 */
+  const wrote = await withRetry(() => safeCall(() => api.saveTables(merged, { baseVersion: st.baseVersion || remote.data?.version || '' }), 'save'), { onRetry: n => store({ failing: n }) });
+  if (!wrote.ok) {
+    /* 撞版：重新讀一次再合併（只自動重試一次；仲撞就叫人再撳，唔會無限迴圈） */
+    if ((wrote.code === 'conflict' || wrote.conflict) && !_retried) {
+      store({ baseVersion: wrote.version || '', lastError: '撞版（有人搶先寫）—— 自動重新合併一次' });
+      return syncNow({ api, mode, tables, decisions, _retried: true });
+    }
+    return failSave(wrote, merged, 'save');
+  }
 
   store({
     base: { ...(st.base || {}), ...merged }, baseVersion: wrote.data?.version || remote.data?.version || '',

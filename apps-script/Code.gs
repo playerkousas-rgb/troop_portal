@@ -90,7 +90,7 @@ var ACTIONS = ['status', 'dbInfo', 'load', 'loadTables', 'saveTables', 'saveTabl
   'saveAudit', 'logAccess', 'getAuditLog', 'getAccessLog', 'purgeOldLogs', 'backupToDrive', 'setupWithToken',
   'registry', 'setUnitStatus', 'saveShare', 'saveRescue', 'deleteRow', 'getTombstones', 'saveDbPart', 'purgeTombstones',
   'noticeSignup', 'borrowApply', 'financeApply', 'progressApply', 'accountApply', 'decideApplication', 'setApplyMode', 'getApplyMode',
-  'backupState', 'purgeLeftMembers', 'dataInventory',
+  'backupState', 'purgeLeftMembers', 'dataInventory', 'getVersion',
   /* P4：移交與升降團（BUILD §6） */
   'transferOut', 'importTransferBundle'];
 
@@ -100,6 +100,27 @@ var SERVER_ONLY = ['authUser', 'dbInfo', 'exportAll', 'importAll', 'backupToDriv
 /* --------------------------- 小工具 -------------------------------------- */
 function ss_() { return SpreadsheetApp.getActiveSpreadsheet(); }
 function props_() { return PropertiesService.getScriptProperties(); }
+/* --------------------------- 資料版本（樂觀鎖 · BUILD §3 §10 條 7） ----------------------
+   版本由 **server** 派（唔係前端自己作）：格式＝ISO 時間 + 隨機尾數（同一秒都分得開）。
+   寫入帶 baseVersion：唔等於現行版本＝有人搶先寫 → 回 conflict（唔會寫落去）。
+   讀（load／loadTables）會回 version；前端用佢做下次寫入嘅 baseVersion。 */
+function readVersion_() {
+  var v = props_().getProperty('DB_VERSION');
+  if (!v) { v = makeVersion_(); props_().setProperty('DB_VERSION', v); }
+  return v;
+}
+function makeVersion_() {
+  return new Date().toISOString().replace('Z', '') + '-' + Math.floor(Math.random() * 0xffff).toString(16).padStart(4, '0');
+}
+/** 寫入前檢查：有帶 baseVersion 而對唔上＝conflict（回報現行版本俾前端重做 merge3） */
+function versionCheck_(baseVersion) {
+  var cur = readVersion_();
+  if (baseVersion && String(baseVersion) !== cur) return { ok: false, cur: cur };
+  return { ok: true, cur: cur };
+}
+function bumpVersion_() {
+  var v = makeVersion_(); props_().setProperty('DB_VERSION', v); return v;
+}
 function cache_() { return CacheService.getScriptCache(); }
 function now_() { return new Date(); }
 function stamp_(d) {
@@ -1100,14 +1121,19 @@ function dispatch_(action, body, params) {
       var name = String(body.table || ''); if (TABLES.indexOf(name) < 0) return err_('bad_table', '冇呢個表：' + name);
       var rows = readTableAll_(name);          // 分件都讀齊
       var sensitive = (body.withSecrets === true) && CTX.mode === 'server' && !body.asUser;
+      /* ★ 保持「回一個 array」嘅舊合約（唔少讀者靠佢）；要版本就用 getVersion 或 loadTables */
       return ok_(sensitive ? rows : rows.map(function (r) { return publicUser_(r); }));
     }
     case 'loadTables': {
       var data = {}; (body.tables && body.tables.length ? body.tables : TABLES).forEach(function (t) { if (TABLES.indexOf(t) >= 0) data[t] = readTableAll_(t).map(publicUser_); });   // 分件都讀齊
-      return ok_({ data: data, version: APP.version });
+      return ok_({ data: data, version: readVersion_(), appVersion: APP.version });       // version＝資料版本（樂觀鎖）；appVersion＝後端程式版
     }
+    case 'getVersion': return ok_({ version: readVersion_(), appVersion: APP.version });
     case 'saveTables': {
       if (!body.data || typeof body.data !== 'object') return err_('bad_data', '冇 data');
+      /* 樂觀鎖：帶咗 baseVersion 而對唔上（有人搶先寫）→ 唔寫，回 conflict ＋現行版本 */
+      var vc = versionCheck_(body.baseVersion);
+      if (!vc.ok) return err_('conflict', '有人搶先寫過（版本對唔上）—— 請重新讀再合併', { version: vc.cur, conflict: true });
       var wrote = {}, fails = [];
       Object.keys(body.data).forEach(function (t) {
         if (TABLES.indexOf(t) < 0) { fails.push(t + '：唔喺白名單'); return; }
@@ -1116,14 +1142,18 @@ function dispatch_(action, body, params) {
       });
       var back = {}; Object.keys(wrote).forEach(function (t) { back[t] = readTableAll_(t).length; });   // 自證要計埋分件
       var confirmed = fails.length === 0 && Object.keys(wrote).every(function (t) { return back[t] >= wrote[t]; });
-      sync_(CTX.mode, Object.keys(wrote).join(','), APP.version, confirmed, 0);
-      audit_(actor_(), '逐表寫入', Object.keys(wrote).join(','), 'confirmed=' + confirmed + (fails.length ? ('；失敗：' + fails.join(' / ')) : ''), CTX.mode === 'server' ? 'api' : 'sig');
-      return ok_({ confirmed: confirmed, wrote: wrote, readBack: back, fails: fails });
+      var newVersion = confirmed ? bumpVersion_() : vc.cur;         // 寫成功先算新版本（失敗＝版本唔郁）
+      sync_(CTX.mode, Object.keys(wrote).join(','), newVersion, confirmed, 0);
+      audit_(actor_(), '逐表寫入', Object.keys(wrote).join(','), 'confirmed=' + confirmed + '｜v=' + newVersion + (fails.length ? ('；失敗：' + fails.join(' / ')) : ''), CTX.mode === 'server' ? 'api' : 'sig');
+      return ok_({ confirmed: confirmed, wrote: wrote, readBack: back, fails: fails, version: newVersion });
     }
     case 'saveTable': {
       if (TABLES.indexOf(body.table) < 0) return err_('bad_table', '冇呢個表');
+      var vc2 = versionCheck_(body.baseVersion);
+      if (!vc2.ok) return err_('conflict', '有人搶先寫過（版本對唔上）—— 請重新讀再合併', { version: vc2.cur, conflict: true });
       var w2 = writeSharded_(body.table, body.rows || [], actor_());     // 超上限自動分件
-      return w2.ok ? ok_({ confirmed: true, rows: w2.rows, parts: w2.parts || [] }) : err_('write_fail', w2.msg);
+      if (!w2.ok) return err_('write_fail', w2.msg);
+      return ok_({ confirmed: true, rows: w2.rows, parts: w2.parts || [], version: bumpVersion_() });
     }
     case 'authUser': {
       var u = findUser_(body.email);

@@ -735,6 +735,36 @@ t('移交：家長處理（同旅＝零改動；轉旅＝來源家長戶停用�
   assert(/transferDate|已經移交/.test(out.data.parentNotice), '通知文案要有移交日期');
 });
 
+/* ⑱ 樂觀鎖：版本由 server 派；帶舊 baseVersion 寫＝conflict（唔會寫落去） */
+t('樂觀鎖：loadTables／saveTables 帶版本；舊 baseVersion＝conflict（唔會覆蓋）', () => {
+  const { G, props } = makeSandbox(); G.initializeSheets();
+  const key = props.get('API_KEY');
+  const v1 = call(G, { action: 'getVersion', apikey: key });
+  assert(/^\d{4}-\d{2}-\d{2}T/.test(v1.data.version), '版本要係 ISO 時間開頭：' + v1.data.version);
+  const lt = call(G, { action: 'loadTables', apikey: key, tables: ['支部'] });
+  assert(lt.data.version === v1.data.version, 'loadTables 要回同一個版本（前端靠佢做 baseVersion）');
+  /* 正常寫：版本會 bump */
+  const w1 = call(G, { action: 'saveTables', apikey: key, baseVersion: v1.data.version, data: { 支部: [{ id: 'b1', name: '童軍團' }] } });
+  assert(w1.success === true && w1.data.confirmed === true, '帶正確版本要寫得入：' + JSON.stringify(w1).slice(0, 120));
+  assert(w1.data.version && w1.data.version !== v1.data.version, '寫成功要 bump 新版本');
+  assert(call(G, { action: 'getVersion', apikey: key }).data.version === w1.data.version, '版本要真係換咗');
+  eq(G.readTable_('支部').length, 1, '寫入要真係落咗');
+  /* 撞版：用舊版本再寫 → conflict，一個字都唔可以寫 */
+  const w2 = call(G, { action: 'saveTables', apikey: key, baseVersion: v1.data.version, data: { 支部: [{ id: 'b9', name: '深資團' }] } });
+  assert(w2.success === false && w2.code === 'conflict', '舊版本要回 conflict：' + JSON.stringify(w2).slice(0, 120));
+  assert(w2.conflict === true && w2.version === w1.data.version, 'conflict 要帶現行版本（前端重做 merge3）：' + JSON.stringify(w2).slice(0, 140));
+  eq(G.readTable_('支部').length, 1, 'conflict 唔可以寫落去');
+  /* 唔帶 baseVersion（舊前端／上游 sig）＝照舊寫得（向後兼容） */
+  const w3 = call(G, { action: 'saveTables', apikey: key, data: { 支部: [{ id: 'b1', name: '童軍團' }, { id: 'b2', name: '深資團' }] } });
+  assert(w3.success === true && w3.data.confirmed === true, '唔帶版本要照寫（兼容）');
+  assert(w3.data.version !== w1.data.version, '成功都要 bump');
+  /* saveTable（單表）一樣要有樂觀鎖 */
+  const st = call(G, { action: 'saveTable', apikey: key, table: '支部', baseVersion: v1.data.version, rows: [{ id: 'zx' }] });
+  assert(st.success === false && st.code === 'conflict', 'saveTable 都要擋舊版本');
+  const st2 = call(G, { action: 'saveTable', apikey: key, table: '支部', baseVersion: w3.data.version, rows: [{ id: 'b1', name: '童軍團' }] });
+  assert(st2.success === true && st2.data.version, 'saveTable 帶正確版本要寫得入 ＋ 回新版本');
+});
+
 /* 收尾 */
 console.log('');
 if (fails.length) {

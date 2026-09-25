@@ -1491,7 +1491,7 @@ await test('★ 同步引擎：三色燈＋樂觀鎖＋merge3 逐格問（示範
   SYNC.resetSync();
   /* 示範模式：一個請求都唔可以發（鐵律） */
   let calls = 0;
-  const fake = { gasAction: async () => { calls++; return { ok: true, data: {} }; }, saveTables: async () => { calls++; return { ok: true }; } };
+  const fake = { loadTables: async () => { calls++; return { ok: true, data: { data: {}, version: 'v1' } }; }, saveTables: async () => { calls++; return { ok: true }; } };
   const mock = await SYNC.syncNow({ api: fake });
   eq(mock.code, 'mock', '示範模式要老實講 mock');
   eq(calls, 0, '示範模式零 fetch');
@@ -1507,7 +1507,7 @@ await test('★ 同步引擎：三色燈＋樂觀鎖＋merge3 逐格問（示範
   const theirs = [{ id: 'n-1', title: '旅露營（佢改）', place: '西貢（佢改）', quota: 40 }];
   let wrote = null;
   const api2 = {
-    gasAction: async () => ({ ok: true, data: { tables: { notices: theirs }, version: 'v2' } }),
+    loadTables: async () => ({ ok: true, data: { data: { notices: theirs }, version: 'v2' } }),
     saveTables: async tb => { wrote = tb; return { ok: true, data: { version: 'v3' } }; }
   };
   const need = await SYNC.syncNow({ api: api2, tables: { notices: mine } });
@@ -1538,9 +1538,26 @@ await test('★ 同步引擎：三色燈＋樂觀鎖＋merge3 逐格問（示範
   assert(batch.ok, 'batch 要寫得入');
   assert(batch.overwrote.length >= 1, '自動揀咗就要留底（overwrote）');
 
+  /* 撞版（有人搶先寫）：自動重新讀＋合併一次，唔會覆蓋人哋嘅改動 */
+  SYNC.resetSync();
+  SYNC.markBase({ notices: [baseNotice] });
+  let tries = 0, wrote2 = null;
+  const clashApi = {
+    loadTables: async () => ({ ok: true, data: { data: { notices: theirs }, version: 'v9' } }),
+    saveTables: async (tb, opts = {}) => {
+      tries++;
+      if (tries === 1) return { ok: false, code: 'conflict', conflict: true, version: 'v9', msg: '有人搶先寫過' };
+      wrote2 = { tb, opts }; return { ok: true, data: { version: 'v10' } };
+    }
+  };
+  const clash = await SYNC.syncNow({ api: clashApi, tables: { notices: mine }, decisions: { 'notices|n-1|title': 'mine', 'notices|n-1|place': 'mine' } });
+  assert(clash.ok, '撞版要自動重試成功：' + (clash.msg || clash.code));
+  eq(tries, 2, '撞版只自動重試一次（唔會無限迴圈）');
+  eq(wrote2.opts.baseVersion, 'v9', '重試要用最新版本做 baseVersion');
+
   /* 送唔到 → 入本機隊列，唔會跌；燈號變黃／紅 */
   SYNC.resetSync();
-  const bad = await SYNC.syncNow({ api: { gasAction: async () => ({ ok: false, code: 'network', msg: '斷線' }), saveTables: async () => ({ ok: false }) }, tables: { notices: mine } });
+  const bad = await SYNC.syncNow({ api: { loadTables: async () => ({ ok: false, code: 'network', msg: '斷線' }), saveTables: async () => ({ ok: false }) }, tables: { notices: mine } });
   eq(bad.ok, false, '連唔到唔可以當成功');
   assert(bad.queued >= 1 && SYNC.queueSize() >= 1, '要入本機隊列');
   assert(['yellow', 'red'].includes(SYNC.light().light), '有未送＝唔可以係綠燈');

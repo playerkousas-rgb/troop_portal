@@ -90,13 +90,26 @@ export async function redeemInvite(token, password, email, name) {
 }
 
 /* ------------------------- 讀寫旅 SHEET ------------------------- */
+/* ★ 樂觀鎖版本：sync.js 每次同步成功會推上去；其他寫入路線（main.js 儲存掣）攞嚟做 baseVersion，
+   避免「用舊資料覆蓋人哋啱啱寫嘅嘢」 */
+let _baseVersion = '';
+export const baseVersion = () => _baseVersion;
+export const setBaseVersion = v => { _baseVersion = String(v || ''); return _baseVersion; };
 export async function loadTables(tables) {
   const g = guard(); if (g) return g;
-  return jfetch('/api/proxy', { action: 'loadTables', unit: unitId(), payload: { tables } });
+  const out = await jfetch('/api/proxy', { action: 'loadTables', unit: unitId(), payload: { tables } });
+  if (out.ok && out.data?.version) setBaseVersion(out.data.version);       // 記住 server 版本做下次寫入嘅 base
+  return out;
 }
-export async function saveTables(data) {
+export async function saveTables(data, { baseVersion: bv = null } = {}) {
   const g = guard(); if (g) return g;
-  return jfetch('/api/proxy', { action: 'saveTables', unit: unitId(), payload: { data } });
+  /* baseVersion＝樂觀鎖：對唔上 GAS 會回 conflict（唔會覆蓋人哋嘅改動）；
+     唔傳＝用上次同步記住嘅版本（sync.js／main.js 共用） */
+  const payload = { data, baseVersion: bv === null ? _baseVersion : String(bv || '') };
+  const out = await jfetch('/api/proxy', { action: 'saveTables', unit: unitId(), payload });
+  if (out.ok && out.data?.version) setBaseVersion(out.data.version);
+  if (out.conflict || out.code === 'conflict') return { ...out, hint: '有人搶先寫過 —— 重新讀一次再合併（唔會覆蓋）' };
+  return out;
 }
 /* ------------------------- P4：移交與升降團（BUILD §6） ------------------------- */
 export async function transferOut(payload) {
@@ -170,8 +183,13 @@ export async function pushToBackend() {
   const names = Object.keys(data);
   if (!names.length) return { ok: true, confirmed: true, wrote: {}, readBack: {}, fails: [], msg: '冇改動（唔使寫）' };
   const t0 = Date.now();
-  const r = await saveTables(data);
-  const ms = Date.now() - t0;
+  let r = await saveTables(data);
+  let ms = Date.now() - t0;
+  /* ★ 撞版（有人搶先寫）：拉最新資料落本機（merge 由 sync.js 嘅三路合併做），
+     呢度只誠實講「撞版，改動仍然留住喺本機」，唔會硬覆蓋。 */
+  if (!r.ok && (r.code === 'conflict' || r.conflict)) {
+    return { ok: false, confirmed: false, conflict: true, code: 'conflict', msg: '有人搶先寫過（版本對唔上）—— 已經幫你拉返最新版本落本機；請去「系統 → 同步」做一次三路合併（唔會覆蓋人哋嘅改動）', ms };
+  }
   if (!r.ok) return { ok: false, confirmed: false, msg: r.msg, code: r.code, ms };
   const d = r.data || {};
   /* confirmed 為準：GAS 讀返自證唔齊 → 當失敗（改動留返本機） */
