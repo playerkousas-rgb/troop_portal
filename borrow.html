@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>物資借用 · 第八十二旅</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2314532D'/%3E%3Ctext x='32' y='44' font-size='36' text-anchor='middle' fill='%23d4af37'%3E%E2%9A%9C%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/css/main.css">
+</head>
+<body class="pub-page">
+<div id="pub"></div>
+<script type="module">
+import { esc, icon, iso, addDays, todayISO, fmtDate, fmtDateFull, toast, normId, modal } from './assets/js/lib/util.js';
+import * as S from './assets/js/lib/store.js';
+
+const d = S.load();
+const root = document.getElementById('pub');
+let viewer = 'public';   // public = 訪客（只睇「全生態共享」）／member = 生態內帳號（睇埋「旅內共享」）
+let filter = 'any';      // any | all | troop
+
+const SCOPE = { any: '全部睇得到嘅範圍', all: '全生態共享', troop: '旅內共享', self: '只限本支部' };
+
+function items() {
+  return d.inventory.filter(i => {
+    if (i.state === 'broken') return false;
+    if (i.scope === 'self') return false;
+    if (viewer === 'public' && i.scope !== 'all') return false;
+    if (filter !== 'any' && i.scope !== filter) return false;
+    return true;
+  });
+}
+
+function draw() {
+  const list = items();
+  const mine = [];
+  d.inventory.forEach(i => (i.loans || []).forEach(l => { if (l.viaLink) mine.push({ ...l, item: i.name, owner: i.owner }); }));
+
+  root.innerHTML = `
+  <div class="pub-hero">
+    <div class="pub-wrap">
+      <div class="emblem">${icon('box', 24)}</div>
+      <h1>${esc(d.unit.name)} · 物資借用</h1>
+      <div class="pub-meta">
+        <span class="tag gold">共享範圍：${esc(SCOPE[filter])}</span>
+        <span class="tag">${viewer === 'public' ? '訪客視角（免登入）' : '生態內帳號視角'}</span>
+        <span class="tag y">示範模式（MOCK）</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="pub-wrap pub-body">
+    <div class="info-box">${icon('info', 15)}<div class="grow">
+      <b>借用規矩</b>：物資有 owner（旅部或者某個支部）。你遞交申請 → 系統<b>路由去 owner 嗰邊批</b>（旅部物資＝旅長已預先授權，即時通過）；
+      紀錄<b>雙邊可見</b>（借出方同借用方都睇到）；庫存（可借數量）自動加減。<br>
+      免登入只列「全生態共享」嘅物資；「旅內共享」要生態內帳號先睇到。
+    </div></div>
+
+    <section class="card mt-16">
+      <div class="card-h">
+        <div><h3 class="mb-0">可借物資</h3><div class="card-sub">${list.length} 項 · 免登入都可以申請</div></div>
+        <div class="btn-row">
+          <select id="bv-viewer">
+            <option value="public" ${viewer === 'public' ? 'selected' : ''}>我係訪客（只睇全生態）</option>
+            <option value="member" ${viewer === 'member' ? 'selected' : ''}>我係生態內帳號</option>
+          </select>
+          <select id="bv-filter">
+            ${[{ v: 'any', l: '全部睇得到嘅範圍' }, { v: 'all', l: '全生態共享' }, { v: 'troop', l: '旅內共享' }]
+      .filter(o => viewer === 'member' || o.v !== 'troop')
+      .map(o => `<option value="${o.v}" ${filter === o.v ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="tbl-wrap"><table class="tbl">
+        <thead><tr><th>物資</th><th>物主（owner）</th><th>共享範圍</th><th>可借</th><th>狀態</th><th></th></tr></thead>
+        <tbody>${list.map(i => {
+    const avail = Number(i.total) - Number(i.out || 0);
+    const pend = (i.loans || []).filter(l => l.state === 'pending').length;
+    return `<tr>
+      <td><b>${esc(i.name)}</b>${i.note ? `<div class="xs faint">${esc(i.note)}</div>` : ''}</td>
+      <td>${esc(i.owner === 'troop' ? '旅部' : S.branchName(i.owner))}${i.owner === 'troop' ? ' <span class="tag gold sm">即時通過</span>' : ' <span class="tag n sm">要該團批</span>'}</td>
+      <td>${esc(SCOPE[i.scope] || i.scope)}</td>
+      <td><b>${avail}</b> <span class="xs faint">／${i.total}</span>${pend ? `<div class="xs faint">${pend} 個待批</div>` : ''}</td>
+      <td>${avail > 0 ? '<span class="tag g sm">可借</span>' : '<span class="tag r sm">借清</span>'}</td>
+      <td><button class="btn sm primary" data-ask="${i.id}" ${avail > 0 ? '' : 'disabled'}>申請借用</button></td>
+    </tr>`;
+  }).join('')}</tbody>
+      </table></div>
+      <div class="xs faint mt-8">借出／歸還／損壞嘅處理，喺旅系統「物資整合 → 借用與歸還」；呢頁只做前台申請。</div>
+    </section>
+
+    ${mine.length ? `<section class="card mt-16">
+      <div class="card-h"><div><h3 class="mb-0">我喺呢部機遞交嘅申請</h3><div class="card-sub">示範：申請記喺本機資料庫；真模式會即時路由去 owner 並寫入審計</div></div></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>物資</th><th>物主</th><th>申請人</th><th>數量</th><th>取用 → 歸還</th><th>狀態</th></tr></thead><tbody>
+        ${mine.map(l => `<tr><td>${esc(l.item)}</td><td>${esc(l.owner === 'troop' ? '旅部' : S.branchName(l.owner))}</td><td>${esc(l.by)}<div class="xs faint">${esc(l.from || '')}</div></td><td>${l.qty}</td>
+          <td class="xs">${esc(fmtDate(l.at))} → ${esc(fmtDate(l.due))}</td>
+          <td>${l.state === 'approved' ? '<span class="tag g sm">已批准（即時）</span>' : '<span class="tag y sm">待物主批</span>'}</td></tr>`).join('')}
+      </tbody></table></div>
+    </section>` : ''}
+
+    <section class="card mt-16">
+      <div class="card-h"><div><h3 class="mb-0">想要嘅物資冇喺度？</h3><div class="card-sub">物資要 owner 開放共享先會出現</div></div></div>
+      <div class="grid g2">
+        <div class="pub-item"><div class="bold">我係支部領袖</div><div class="sm">登入旅系統 →「物資整合 → 借用與歸還」向旅部或者其他支部提出；旅長會喺「需要你處理」見到。</div>
+          <div class="btn-row mt-8"><a class="btn sm" href="index.html?step=login">去登入</a></div></div>
+        <div class="pub-item"><div class="bold">冇帳號？</div><div class="sm">留低你嘅借用需求：旅長會覆你（示範模式唔會真送出去）。</div>
+          <div class="btn-row mt-8"><a class="btn sm" href="index.html?step=login">了解點開戶</a></div></div>
+      </div>
+    </section>
+
+    <div class="sec-note mt-16 xs faint">示範模式：資料住你部機（localStorage）。真模式：申請經旅後端寫入，owner 收到待辦。</div>
+  </div>
+  <div id="toasts"></div>`;
+
+  root.querySelector('#bv-viewer').onchange = e => {
+    viewer = e.target.value;
+    if (viewer === 'public' && filter === 'troop') filter = 'any';   // 訪客睇唔到旅內共享
+    draw();
+  };
+  root.querySelector('#bv-filter').onchange = e => { filter = e.target.value; draw(); };
+
+  root.querySelectorAll('[data-ask]').forEach(b => b.addEventListener('click', () => ask(b.dataset.ask)));
+}
+
+function ask(itemId) {
+  const it = d.inventory.find(i => i.id === itemId);
+  const avail = Number(it.total) - Number(it.out || 0);
+  const auto = it.owner === 'troop';
+  const m = modal({
+    title: `申請借用：${it.name}`,
+    body: `
+    <div class="grid g2">
+      <label class="f"><span class="lb">申請人姓名</span><input type="text" id="bq-name" placeholder="李美儀"></label>
+      <label class="f"><span class="lb">單位（支部／其他旅）</span><input type="text" id="bq-from" placeholder="童軍團 sc0082"></label>
+      <label class="f"><span class="lb">YMIS／SCOUT_ID（可空）</span><input type="text" id="bq-ymis" placeholder="YMIS-2001"></label>
+      <label class="f"><span class="lb">聯絡（電話／電郵）</span><input type="text" id="bq-contact" placeholder="9123 4567"></label>
+      <label class="f"><span class="lb">數量（可借 ${avail}／${it.total}）</span><input type="number" id="bq-qty" value="1" min="1" max="${avail}"></label>
+      <label class="f"><span class="lb">用途</span><input type="text" id="bq-purpose" placeholder="旅露營（10 月）"></label>
+      <label class="f"><span class="lb">取用日</span><input type="date" id="bq-from2" value="${todayISO()}"></label>
+      <label class="f"><span class="lb">歸還日</span><input type="date" id="bq-due" value="${addDays(todayISO(), 7)}"></label>
+    </div>
+    <div class="info-box mt-12">${icon('info', 15)}<div class="grow">
+      申請會路由去 <b>${esc(it.owner === 'troop' ? '旅部（旅長已預先授權 → 即時通過）' : S.branchName(it.owner) + ' 領袖')}</b>；
+      紀錄雙邊可見；批准之後庫存自動減。
+    </div></div>`,
+    footer: `<button class="btn" data-close>取消</button><button class="btn primary" data-do>遞交申請</button>`,
+    onMount: (dlg, close) => {
+      dlg.querySelector('[data-close]').onclick = close;
+      dlg.querySelector('[data-do]').onclick = () => {
+        const name = dlg.querySelector('#bq-name').value.trim();
+        const qty = Number(dlg.querySelector('#bq-qty').value || 1);
+        if (!name) return toast('請填申請人姓名', 'err');
+        if (!qty || qty < 1) return toast('數量唔啱', 'err');
+        if (qty > avail) return toast('超出可借數量', 'err');
+        const rec = {
+          id: 'l-' + Date.now(), by: name, from: dlg.querySelector('#bq-from').value.trim(),
+          ymis: normId(dlg.querySelector('#bq-ymis').value.trim()),
+          contact: dlg.querySelector('#bq-contact').value.trim(),
+          purpose: dlg.querySelector('#bq-purpose').value.trim(),
+          at: dlg.querySelector('#bq-from2').value || todayISO(),
+          due: dlg.querySelector('#bq-due').value || addDays(todayISO(), 7),
+          qty, state: auto ? 'approved' : 'pending', viaLink: true, requestedAt: fmtDateFull(todayISO())
+        };
+        S.commit(dd => {
+          const item = dd.inventory.find(x => x.id === itemId);
+          item.loans = item.loans || [];
+          item.loans.push(rec);
+          if (auto) item.out = Number(item.out || 0) + qty;
+        });
+        S.audit('物資借用申請（公開頁）', `${it.name} ×${qty}`, `${name}${rec.from ? ' · ' + rec.from : ''} → ${auto ? '旅部即時通過' : '待 ' + S.branchName(it.owner) + ' 批'}`, 'LINK');
+        close();
+        toast(auto ? '已即時通過（旅部物資）—— 記得約交收' : `已遞交 —— 等 ${S.branchName(it.owner)} 領袖批`, 'ok', '', null, 5200);
+        setTimeout(draw, 400);
+      };
+    }
+  });
+  return m;
+}
+
+draw();
+</script>
+</body>
+</html>

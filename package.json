@@ -1,0 +1,20 @@
+{
+  "name": "troop-portal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "旅系統（生態系統嘅頂點）— 純靜態零依賴；UI 先行示範版（示範旅 MOCK 數據）",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node dev-server.mjs",
+    "serve": "python3 -m http.server 8000",
+    "lint": "node scripts/lint.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "check": "node scripts/lint.mjs && node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.1"
+  }
+}

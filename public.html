@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第八十二旅 · 公開資料</title>
+<meta name="description" content="第八十二旅公開資料 — 免登入都睇得到（等級 0）。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2314532D'/%3E%3Ctext x='32' y='44' font-size='36' text-anchor='middle' fill='%23d4af37'%3E%E2%9A%9C%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/css/main.css">
+</head>
+<body class="pub-page">
+<div id="pub"></div>
+<script type="module">
+import { esc, icon, money, fmtDate, fmtDateFull, qrSvg, copyText, toast } from './assets/js/lib/util.js';
+import * as S from './assets/js/lib/store.js';
+import { VIS_LEVELS } from './assets/js/lib/registry.js';
+
+const d = S.load();
+const base = location.origin + location.pathname.replace(/[^/]*$/, '');
+const items = S.visiblePublic(d.publicProfile.troop, 0);        // 訪客＝等級 0 為止
+const bItems = S.visiblePublic(d.publicProfile.branches, 0);
+const notices = d.notices.filter(n => n.status === 'published' && Number(n.vis) === 0);
+const events = d.calendar.filter(e => e.public && e.date >= new Date().toISOString().slice(0, 10)).slice(0, 6);
+const kind = k => ({ social: '社交媒體', album: '相簿', site: '網站', link: '連結', about: '簡介' }[k] || k);
+
+document.getElementById('pub').innerHTML = `
+<div class="pub-hero">
+  <div class="pub-wrap">
+    <div class="emblem">⚜</div>
+    <h1>${esc(d.unit.name)}</h1>
+    <div class="pub-sub">${esc(d.unit.nameEn)} · ${esc(d.unit.district)} · ${esc(d.unit.sponsor)}</div>
+    <div class="pub-meta">
+      <span class="tag gold">${esc(d.unit.code)}</span>
+      <span class="tag">${esc(d.unit.founded || '1978')} 年創立</span>
+      <span class="tag">5 個支部</span>
+      <span class="tag">現役約 135 人</span>
+      <span class="tag y">示範模式（MOCK）</span>
+    </div>
+  </div>
+</div>
+
+<div class="pub-wrap pub-body">
+  <div class="info-box">
+    ${icon('info', 15)}
+    <div class="grow">呢一頁係<b>免登入</b>嘅公開頁：只顯示旅長開放畀公眾（等級 0）嘅資料。
+    睇唔到嘅嘢唔係壞咗 —— 係未開放或者要登入（家長／領袖／成員各有唔同視野）。</div>
+  </div>
+
+  <section class="card mt-16">
+    <div class="card-h"><div><h3 class="mb-0">旅團簡介</h3><div class="card-sub">等級 0 · 公眾</div></div></div>
+    <p>${esc(d.unit.publicIntro)}</p>
+    <div class="kv">
+      <dt>地區</dt><dd>${esc(d.unit.district)}</dd>
+      <dt>贊助機構</dt><dd>${esc(d.unit.sponsor)}</dd>
+      <dt>創立</dt><dd>1978 年</dd>
+      <dt>公開聯絡</dt><dd><a href="mailto:${esc(d.unit.publicContact)}">${esc(d.unit.publicContact)}</a></dd>
+    </div>
+  </section>
+
+  <section class="card mt-16">
+    <div class="card-h"><div><h3 class="mb-0">公開資料</h3><div class="card-sub">旅長設定：邊一項開放、睇到嘅等級</div></div>
+      <span class="tag g sm">${items.length} 項</span></div>
+    <div class="pub-grid">
+      ${items.map(i => `<div class="pub-item">
+        <div class="card-sub">${esc(kind(i.kind))}</div>
+        <div class="bold">${esc(i.title)}</div>
+        <div class="sm">${['link', 'site', 'album'].includes(i.kind) ? `<a href="${esc(i.value)}" target="_blank" rel="noopener">${esc(i.value)}</a>` : esc(i.value)}</div>
+      </div>`).join('')}
+    </div>
+  </section>
+
+  ${notices.length ? `<section class="card mt-16">
+    <div class="card-h"><div><h3 class="mb-0">對外公佈嘅通告</h3><div class="card-sub">開放等級 0 嘅通告，免登入都睇到同報名</div></div></div>
+    ${notices.map(n => `<div class="pub-notice">
+      <div class="flex-b"><div>
+        <a class="bold" href="notice.html?u=${esc(d.unit.code)}&n=${esc(n.id)}">${esc(n.title)}</a>
+        <div class="xs faint">${esc(n.category)} · 活動日期 ${n.eventDate ? fmtDateFull(n.eventDate) : '—'}${n.fee ? ' · 費用 ' + money(n.fee) : ' · 免費'} · 截止 ${n.deadline ? fmtDate(n.deadline) : '—'}</div>
+      </div><span class="tag n sm">${Number(n.signed || 0)}${n.quota ? '/' + n.quota : ''} 人</span></div>
+      <div class="sm mt-8">${esc(String(n.body || '').split('\n')[0])}</div>
+      <div class="btn-row mt-8"><a class="btn sm primary" href="notice.html?u=${esc(d.unit.code)}&n=${esc(n.id)}">睇詳情／報名</a></div>
+    </div>`).join('')}
+  </section>` : ''}
+
+  ${events.length ? `<section class="card mt-16">
+    <div class="card-h"><div><h3 class="mb-0">公開活動</h3><div class="card-sub">日曆上標明「公開」嘅活動</div></div></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>日期</th><th>活動</th><th>地點</th><th>支部</th></tr></thead><tbody>
+      ${events.map(e => `<tr><td>${esc(fmtDate(e.date, true))}</td><td>${esc(e.title)}</td><td>${esc(e.place || '—')}</td><td>${esc(e.cal === 'troop' ? '旅部' : S.branchName(e.cal))}</td></tr>`).join('')}
+    </tbody></table></div>
+  </section>` : ''}
+
+  ${bItems.length ? `<section class="card mt-16">
+    <div class="card-h"><div><h3 class="mb-0">支部公開資料</h3><div class="card-sub">支部自己上報、旅長批（等級 0 先會出現喺呢度）</div></div></div>
+    <div class="pub-grid">${bItems.map(i => `<div class="pub-item">
+      <div class="card-sub">${esc(S.branchName(i.branchId))} · ${esc(kind(i.kind))}</div>
+      <div class="bold">${esc(i.title)}</div><div class="sm">${esc(i.value)}</div></div>`).join('')}</div>
+  </section>` : ''}
+
+  <section class="card mt-16">
+    <div class="card-h"><div><h3 class="mb-0">想睇多啲？</h3><div class="card-sub">旅係所有人嘅登入窗口；入到去先揀支部</div></div></div>
+    <div class="grid g2">
+      <div class="pub-item">
+        <div class="bold">旅長／旅層領袖／家長</div>
+        <div class="sm">用旅嘅帳號登入 → 睇你身分睇得到嘅嘢（家長會自動併埋子女跨支部資料）。</div>
+        <div class="btn-row mt-8"><a class="btn primary sm" href="index.html?step=login">${icon('key', 13)} 去登入</a></div>
+      </div>
+      <div class="pub-item">
+        <div class="bold">成員</div>
+        <div class="sm">成員帳號住自己屬團嘅支部系統；旅只做導流。喺登入頁撳「我係成員」揀返自己支部。</div>
+        <div class="btn-row mt-8"><a class="btn sm" href="index.html?step=login">${icon('arrowR', 13)} 成員入口</a></div>
+      </div>
+      <div class="pub-item">
+        <div class="bold">物資借用（公開範圍）</div>
+        <div class="sm">只列出已設「公眾／生態內」共享嘅物資；申請會路由去物主（owner）嗰邊批。</div>
+        <div class="btn-row mt-8"><a class="btn sm" href="borrow.html">${icon('box', 13)} 睇物資</a></div>
+      </div>
+      <div class="pub-item">
+        <div class="bold">分享呢一頁</div>
+        <div class="sm">QR／連結唔會帶任何 key（密鑰只存伺服器）。</div>
+        <div class="btn-row mt-8"><button class="btn sm" id="pub-copy">${icon('copy', 13)} 複製連結</button><button class="btn sm" id="pub-qr">${icon('qr', 13)} QR</button></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="sec-note mt-16">
+    <div class="xs faint"><b>示範模式</b>：呢頁讀嘅資料住喺你部機（localStorage），唔會送去任何後端。
+    真模式會由旅後端按等級過濾（未登入＝只回等級 0），並且記入操作紀錄。</div>
+    <div class="xs faint mt-8">可見等級：${VIS_LEVELS.map(v => `${v.id} ${esc(v.name)}`).join(' ＜ ')}</div>
+  </div>
+</div>
+<div id="toasts"></div>`;
+
+document.getElementById('pub-copy').onclick = () => copyText(location.href);
+document.getElementById('pub-qr').onclick = () => {
+  const m = document.createElement('div');
+  m.className = 'mask';
+  m.innerHTML = `<div class="dlg"><header><h3>公開頁 QR</h3><button class="x">×</button></header>
+    <div class="body"><div class="qr-box">${qrSvg(location.href, 4, 2)}</div>
+    <div class="mono xs mt-8" style="word-break:break-all">${esc(location.href)}</div></div>
+    <footer><button class="btn primary">關閉</button></footer></div>`;
+  document.body.appendChild(m);
+  const close = () => m.remove();
+  m.onclick = e => { if (e.target === m) close(); };
+  m.querySelector('.x').onclick = close;
+  m.querySelector('.btn.primary').onclick = close;
+};
+</script>
+</body>
+</html>

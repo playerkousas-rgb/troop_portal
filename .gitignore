@@ -1,0 +1,11 @@
+node_modules/
+.vercel/
+.cache/
+*.bak
+*.tmp
+*.old
+*.log
+*~
+.DS_Store
+uploads/
+coverage/

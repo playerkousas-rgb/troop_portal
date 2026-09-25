@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>通告 · 第八十二旅</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2314532D'/%3E%3Ctext x='32' y='44' font-size='36' text-anchor='middle' fill='%23d4af37'%3E%E2%9A%9C%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/css/main.css">
+</head>
+<body class="pub-page">
+<div id="pub"></div>
+<script type="module">
+import { esc, icon, money, fmtDate, fmtDateFull, toast, qrSvg, copyText, normId, todayISO } from './assets/js/lib/util.js';
+import * as S from './assets/js/lib/store.js';
+
+const q = new URLSearchParams(location.search);
+const d = S.load();
+const id = q.get('n') || q.get('id');
+// 有指定編號但搵唔到 → 誠實失敗（唔會靜靜地彈第二張通告出嚟）
+const notice = id ? (d.notices.find(n => n.id === id) || null) : d.notices.find(n => n.status === 'published');
+const root = document.getElementById('pub');
+const base = location.origin + location.pathname.replace(/[^/]*$/, '');
+const shareUrl = `${base}notice.html?u=${esc(d.unit.code)}&n=${esc(notice?.id || '')}`;
+
+if (!notice) {
+  root.innerHTML = `<div class="pub-hero"><div class="pub-wrap">
+      <div class="emblem">${icon('warn', 24)}</div>
+      <h1>搵唔到呢張通告</h1>
+      <div class="pub-meta"><span class="tag r">連結可能已失效</span><span class="tag">編號：${esc(id || '（冇）')}</span></div>
+    </div></div>
+    <div class="pub-wrap pub-body">
+      <div class="card">
+        <div class="err">編號「${esc(id || '（冇）')}」喺 ${esc(d.unit.name)} 嘅通告表搵唔到。可能係：
+          <ul class="doc"><li>通告已撤回或者刪除（撤回嘅通告唔會再由連結睇到）</li>
+          <li>連結打錯／被改過（我哋唔會靜靜地彈第二張通告出嚟頂替）</li>
+          <li>你手上嘅連結屬於另一個旅（每個旅自己一張 Sheet）</li></ul></div>
+        <div class="btn-row mt-12">
+          <a class="btn primary" href="public.html">返公開頁</a>
+          <a class="btn" href="index.html?step=login">登入睇全部通告</a>
+        </div>
+        <div class="xs faint mt-8">真模式：搵唔到嘅通告會回一個「誠實失敗」訊息（唔會回空白頁或者假成功）。</div>
+      </div>
+    </div>
+    <div id="toasts"></div>`;
+} else {
+  const signups = notice.signups || [];
+  const mySignup = signups.filter(s => s.ymis);
+  const signed = Number(notice.signed || 0) + signups.length;
+  const isPublic = Number(notice.vis) === 0;
+
+  root.innerHTML = `
+  <div class="pub-hero">
+    <div class="pub-wrap">
+      <div class="emblem">${icon('megaphone', 24)}</div>
+      <h1>${esc(d.unit.name)} · 通告</h1>
+      <div class="pub-meta">
+        <span class="tag gold">${esc(notice.scope === 'troop' ? '旅通告' : S.branchName(notice.ownerBranch) + ' 支部通告')}</span>
+        <span class="tag">${esc(notice.category)}</span>
+        ${isPublic ? '<span class="tag g">對外公佈（免登入）</span>' : '<span class="tag y">分享連結可見</span>'}
+        <span class="tag">示範模式</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="pub-wrap pub-body">
+    <section class="card">
+      <h2 class="mt-0">${esc(notice.title)}</h2>
+      <div class="card-sub">發佈 ${esc(fmtDate(notice.at, true))}${notice.deadline ? ' · 截止 ' + esc(fmtDate(notice.deadline, true)) : ''}</div>
+      <div class="grid g4 mt-12">
+        <div class="stat"><div class="k">活動日期</div><div class="v" style="font-size:18px">${notice.eventDate ? esc(fmtDateFull(notice.eventDate)) : '—'}</div></div>
+        <div class="stat"><div class="k">費用</div><div class="v" style="font-size:18px">${notice.fee ? money(notice.fee) : '免費'}</div></div>
+        <div class="stat"><div class="k">名額</div><div class="v" style="font-size:18px">${notice.quota || '不限'}</div></div>
+        <div class="stat ok"><div class="k">已報名</div><div class="v" style="font-size:18px">${signed}${notice.quota ? ' / ' + notice.quota : ''}</div></div>
+      </div>
+      <div class="mt-12" style="white-space:pre-wrap">${esc(notice.body)}</div>
+      ${(notice.attachments || []).length ? `<div class="mt-12"><b class="sm">附件</b><div class="btn-row mt-8">
+        ${notice.attachments.map(a => `<span class="tag n">${icon('clip', 12)} ${esc(a)}</span>`).join('')}
+        <span class="xs faint">（附件只指向來源；旅唔會代存檔）</span></div></div>` : ''}
+      <div class="btn-row mt-16">
+        <button class="btn sm" id="share-copy">${icon('copy', 13)} 複製分享連結</button>
+        <button class="btn sm" id="share-qr">${icon('qr', 13)} QR</button>
+        <button class="btn sm" onclick="window.print()">${icon('print', 13)} 列印／存 PDF</button>
+      </div>
+      <div class="xs faint mt-8">分享連結：<span class="mono">${esc(shareUrl)}</span>（連結永不帶 key）</div>
+    </section>
+
+    ${notice.status !== 'published' ? `<div class="warn-box mt-16">${icon('warn', 15)} 呢張通告係<b>草稿</b>，仲未發佈 —— 分享畀人會見到「未發佈」。</div>` : ''}
+
+    <section class="card mt-16">
+      <div class="card-h"><div><h3 class="mb-0">${notice.signupFrom === 'login' ? '報名（需登入）' : '報名（免登入）'}</h3>
+        <div class="card-sub">${notice.signupFrom === 'login' ? '呢張通告設定咗要登入先報名（例如執委會）' : '家長／成員都可以免登入報名；家長可以代子女填'}</div></div></div>
+
+      <div class="grid g3">
+        <label class="f"><span class="lb">姓名</span><input type="text" id="sg-name" placeholder="陳小萍"></label>
+        <label class="f"><span class="lb">YMIS／SCOUT_ID（成員填）</span><input type="text" id="sg-ymis" placeholder="YMIS-2001"></label>
+        <label class="f"><span class="lb">關係</span><select id="sg-rel">
+          <option value="member">本人（成員）</option>
+          <option value="parent">家長代填</option>
+          <option value="guest">嘉賓／訪客</option>
+        </select></label>
+        <label class="f"><span class="lb">出席</span><select id="sg-attend">
+          <option value="yes">出席</option><option value="no">唔出席</option><option value="maybe">未定</option>
+        </select></label>
+        <label class="f"><span class="lb">膳食</span><select id="sg-meal">
+          <option value="none">冇特別</option><option value="veg">素食</option><option value="no-beef">不吃牛</option><option value="allergy">食物敏感</option>
+        </select></label>
+        <label class="f"><span class="lb">聯絡電話／電郵</span><input type="text" id="sg-contact" placeholder="9123 4567"></label>
+      </div>
+      <label class="f"><span class="lb">備註（藥物、緊急聯絡、特別需要）</span><textarea id="sg-note" placeholder="例：需定時服藥；緊急聯絡 9123 4567"></textarea></label>
+      ${notice.fee ? `<label class="check"><input type="checkbox" id="sg-fee"> 我明白費用 ${money(notice.fee)} 由支部收取（旅系統唔收錢、唔存信用卡）</label>` : ''}
+      <label class="check"><input type="checkbox" id="sg-consent"> 家長同意子女參加（未滿 18 歲必填；同意書文案見旅系統「PDPO 與私隱」）</label>
+      <div class="btn-row mt-12">
+        <button class="btn primary" id="sg-go">${icon('check', 14)} 提交報名</button>
+        <a class="btn" href="index.html?step=login">登入睇更多（我嘅通告／訂閱）</a>
+      </div>
+      <div class="xs faint mt-8">示範模式：報名會寫入你部機嘅示範資料庫，並顯示「已報名」名單（真模式會記入通告表 ＋ 審計，同埋只推一次通知）。</div>
+    </section>
+
+    ${mySignup.length ? `<section class="card mt-16">
+      <div class="card-h"><div><h3 class="mb-0">已報名（示範 · 本機）</h3><div class="card-sub">同一通告只會推一次通知；除名要搵團長</div></div></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>姓名</th><th>YMIS</th><th>關係</th><th>出席</th><th>提交時間</th></tr></thead><tbody>
+        ${mySignup.map(s => `<tr><td>${esc(s.name)}</td><td class="mono xs">${esc(s.ymis || '—')}</td><td>${esc({ parent: '家長代填', member: '本人', guest: '訪客' }[s.rel] || s.rel)}</td><td>${esc({ yes: '出席', no: '唔出席', maybe: '未定' }[s.attend])}</td><td class="xs faint">${esc(s.at)}</td></tr>`).join('')}
+      </tbody></table></div>
+    </section>` : ''}
+
+    <section class="card mt-16">
+      <div class="card-h"><div><h3 class="mb-0">訂閱呢類通告 ★</h3><div class="card-sub">個人化訂閱：支部 × 分類；設定住喺本機（唔會送去圖書館知道係你）</div></div></div>
+      <div class="flex-w">
+        ${d.branches.map(b => `<label class="check"><input type="checkbox" data-sub="${b.id}" ${(S.getPrefs().subs || []).includes(b.id) ? 'checked' : ''}> ${esc(b.name)}</label>`).join('')}
+      </div>
+      <div class="flex-w mt-8">
+        ${['活動', '服務', '訓練', '比賽', '行政'].map(c => `<label class="check"><input type="checkbox" data-subcat="${c}" ${(S.getPrefs().subsCat || []).includes(c) ? 'checked' : ''}> ${esc(c)}</label>`).join('')}
+      </div>
+      <div class="btn-row mt-8"><button class="btn sm primary" id="sub-save">${icon('bell', 13)} 儲存訂閱</button>
+        <span class="xs faint">命中即推；推送基建＝通告圖書館原有鏈（Supabase ＋ 每日 06:00 notify）；圖書館知幾多人訂、訂咩，唔知邊個。</span></div>
+    </section>
+
+    <div class="sec-note mt-16 xs faint">示範模式：資料住你部機（localStorage）。真模式：旅後端按等級過濾，並記入操作紀錄。</div>
+  </div>
+  <div id="toasts"></div>`;
+
+  document.getElementById('share-copy').onclick = () => copyText(shareUrl);
+  document.getElementById('share-qr').onclick = () => {
+    const m = document.createElement('div');
+    m.className = 'mask';
+    m.innerHTML = `<div class="dlg"><header><h3>通告 QR</h3><button class="x">×</button></header>
+      <div class="body"><div class="qr-box">${qrSvg(shareUrl, 4, 2)}</div>
+      <div class="mono xs mt-8" style="word-break:break-all">${esc(shareUrl)}</div>
+      <div class="xs faint mt-8">QR 只帶通告編號；收件人免登入就睇到同報名。</div></div>
+      <footer><button class="btn primary">關閉</button></footer></div>`;
+    document.body.appendChild(m);
+    const close = () => m.remove();
+    m.onclick = e => { if (e.target === m) close(); };
+    m.querySelector('.x').onclick = close;
+    m.querySelector('.btn.primary').onclick = close;
+  };
+
+  document.getElementById('sg-go').onclick = () => {
+    const name = document.getElementById('sg-name').value.trim();
+    const ymis = normId(document.getElementById('sg-ymis').value.trim());
+    const rel = document.getElementById('sg-rel').value;
+    const attend = document.getElementById('sg-attend').value;
+    const consent = document.getElementById('sg-consent').checked;
+    const feeAck = document.getElementById('sg-fee') ? document.getElementById('sg-fee').checked : true;
+    if (!name) return toast('請填姓名', 'err');
+    if (rel === 'member' && !ymis) return toast('成員要填 YMIS（方便核對名冊）', 'err');
+    if (notice.signupFrom === 'login' && !S.getSession()) return toast('呢張通告要登入先報名', 'err');
+    if (!consent) return toast('未滿 18 歲要家長同意', 'err');
+    if (!feeAck) return toast('請確認費用安排', 'err');
+    if (notice.quota && signed >= notice.quota) return toast('名額已滿 —— 可以後補（已記入候補名單）', 'warn');
+
+    S.commit(dd => {
+      const n = dd.notices.find(x => x.id === notice.id);
+      n.signups = n.signups || [];
+      n.signups.push({
+        id: 'sg-' + Date.now(), name, ymis, rel, attend,
+        meal: document.getElementById('sg-meal').value,
+        contact: document.getElementById('sg-contact').value.trim(),
+        note: document.getElementById('sg-note').value.trim(),
+        at: new Date().toISOString().slice(0, 16).replace('T', ' '),
+        viaLink: true
+      });
+    });
+    S.audit('通告報名（分享連結）', `${notice.title} · ${name}`, `${rel}/${attend}${ymis ? ' · ' + ymis : ''}`, 'LINK');
+    toast('已收到你嘅報名 —— 團長會喺系統見到', 'ok', '', null, 5000);
+    setTimeout(() => location.reload(), 900);
+  };
+
+  document.querySelectorAll('[data-sub]').forEach(c => c.addEventListener('change', () => {
+    const cur = new Set(S.getPrefs().subs || []);
+    c.checked ? cur.add(c.dataset.sub) : cur.delete(c.dataset.sub);
+    S.setPref('subs', Array.from(cur));
+  }));
+  document.querySelectorAll('[data-subcat]').forEach(c => c.addEventListener('change', () => {
+    const cur = new Set(S.getPrefs().subsCat || []);
+    c.checked ? cur.add(c.dataset.subcat) : cur.delete(c.dataset.subcat);
+    S.setPref('subsCat', Array.from(cur));
+  }));
+  document.getElementById('sub-save').onclick = () => toast('訂閱已存喺呢部機（示範）', 'ok');
+}
+</script>
+</body>
+</html>
