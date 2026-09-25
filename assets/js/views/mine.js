@@ -100,7 +100,8 @@ export function render(el) {
         </div>
       </div>
       <div class="btn-row">
-        <button class="btn primary" id="mi-enter">${icon('branch', 14)} 入我嘅支部系統</button>
+        <button class="btn primary" id="mi-enter">${icon('branch', 14)} 我支部嘅系統狀態</button>
+        <a class="btn" href="#/shares">${icon('share', 14)} 分享中心${S.pendingShares(s.branchId).length ? ` (${S.pendingShares(s.branchId).length})` : ''}</a>
         <button class="btn" id="mi-card">${icon('doc', 14)} 身份卡</button>
       </div>
     </div>` })}
@@ -109,6 +110,7 @@ export function render(el) {
     { k: '可見等級上限', v: visName(rank), tone: 'ok', hint: s.perms?.rank ? '（逐人微調）' : '（跟身份／職稱）' },
     { k: '年齡', v: age === null ? '未填生日' : age + ' 歲' },
     { k: '通告', v: notices.length },
+    { k: '待接收分享', v: S.pendingShares(s.branchId).length, tone: S.pendingShares(s.branchId).length ? 'warn' : 'ok' },
     { k: '活動', v: events.length },
     { k: '本團物資', v: loans.length }
   ])}
@@ -178,13 +180,15 @@ export function render(el) {
   el.querySelector('#mi-enter').onclick = () => {
     const st = branchEntryStatus(s.branchId);
     modal({
-      title: `進入 ${b?.name || ''}`,
+      title: `${b?.name || ''} · 系統狀態`,
       body: `${st.ok ? notice(st.note, st.state === 'green' ? 'ok' : 'warn') : notice(st.msg, 'err')}
       <div class="kv mt-12">
         <dt>入口</dt><dd><span class="mono">${esc(branchEntryUrl(s.branchId, s.ymis))}</span></dd>
         <dt>狀態</dt><dd>${badge(st.state === 'green' ? '綠色：已接駁 ＋ 已閂本地登入' : st.state === 'yellow' ? '黃色：已登記、未閂口' : '紅色：未登記下游', st.state === 'green' ? 'g' : st.state === 'yellow' ? 'y' : 'r', true)}</dd>
-        <dt>密碼由邊個驗</dt><dd>該團後端（旅系統唔會、亦唔可以代驗）</dd>
-      </div>`,
+        <dt>密碼由邊個驗</dt><dd>該團後端（示範模式：由旅閘嘅示範帳號模擬）</dd>
+        <dt>你而家喺邊</dt><dd>★ 你就係由<b>旅入口</b>入咗你支部（名冊正本仍然住該團 SHEET）：旅入口＝你支部嘅入口，唔使另開一個系統</dd>
+      </div>
+      <div class="mt-12">${notice('你喺旅睇到嘅嘢 ＝ <b>你支部嘅嘢</b> ＋ <b>其他支部 share 咗並經你哋接收</b>嘅嘢。要跨支部睇多啲 → 由該團批「跨團幫手」，唔會靜靜地放行。', 'info')}</div>`,
       footer: `<button class="btn primary" onclick="this.closest('.mask').remove()">明白</button>`
     });
   };

@@ -166,20 +166,21 @@ await test('Shell：旅長登入後見到導航、未寫入計數、儲存掣', 
 /* ---------- 每個角色 × 全部路由 ---------- */
 const ROUTES = [
   'dashboard', 'mine', 'pending', 'branches', 'branch/vs0082', 'notices', 'notice/n-1', 'calendar',
-  'finance', 'inventory', 'transfers', 'users', 'public', 'system', 'docs', 'docs/blueprint'
+  'finance', 'inventory', 'transfers', 'users', 'shares', 'public', 'system', 'docs', 'docs/blueprint'
 ];
 const ROLE_ROUTES = {
   chief: ROUTES,
   coach: ROUTES.filter(r => !['system'].includes(r)),
   parent: ['dashboard', 'branches', 'branch/vs0082', 'notices', 'notice/n-1', 'calendar', 'public', 'children', 'docs', 'docs/blueprint'],
-  member: ['dashboard', 'mine', 'branches', 'notices', 'notice/n-1', 'calendar', 'inventory', 'public', 'docs', 'docs/blueprint'],
-  branchLeader: ['dashboard', 'mine', 'branches', 'branch/cs0082', 'notices', 'calendar', 'inventory', 'public', 'docs', 'docs/blueprint'],
+  member: ['dashboard', 'mine', 'branches', 'notices', 'notice/n-1', 'calendar', 'inventory', 'shares', 'public', 'docs', 'docs/blueprint'],
+  branchLeader: ['dashboard', 'mine', 'branches', 'branch/cs0082', 'notices', 'calendar', 'inventory', 'shares', 'public', 'docs', 'docs/blueprint'],
+  scout: ['dashboard', 'mine', 'notices', 'calendar', 'inventory', 'shares', 'public', 'docs', 'docs/blueprint'],
   super: ['dashboard', 'platform', 'docs'],
   guest: ['docs']
 };
 const LOGIN_FOR = {
   chief: 'u-chief', coach: 'u-lee', parent: 'u-parent',
-  member: 'u-m-minor', branchLeader: 'u-b-leader', super: 'u-super'
+  member: 'u-m-minor', branchLeader: 'u-b-leader', scout: 'u-m-scout', super: 'u-super'
 };
 
 for (const [role, routes] of Object.entries(ROLE_ROUTES)) {
@@ -225,8 +226,9 @@ await test('登入閘：mustChangePw 帳號會被標記（強制改密碼）', a
 /* ---------- 全部 tab 直接 render ---------- */
 const TABS = {
   mine: ['x'],
+  shares: ['inbox', 'accepted', 'sent', 'rules'],
   platform: ['inbox', 'units', 'keys'],
-  branches: ['overview', 'link', 'members', 'finance', 'notices', 'calendar', 'inventory', 'progress', 'public'],
+  branches: ['overview', 'shares', 'link', 'members', 'finance', 'notices', 'calendar', 'inventory', 'progress', 'public'],
   notices: ['list', 'signup', 'subs', 'drafts'],
   calendar: ['month', 'list'],
   finance: ['overview', 'branch', 'troop', 'report'],
@@ -268,6 +270,100 @@ await test('頂部互動：儲存到後端會出收據 modal', async () => {
   assert(dlg.textContent.includes('confirmed'), '收據冇 confirmed 字樣');
   dlg.querySelector('[data-do]').click();
   ok('（收據內容正確）');
+});
+
+/* ---------- ★ 分享：收件方決定 ---------- */
+await test('分享：未接收＝唔會出現喺通告；接收＝出現並標明來源', async () => {
+  A.loginAs('u-m-minor');            // 童軍團副隊長（收到深資團嘅分享）
+  const title = '深資童軍：「黑夜行」活動通告';
+  assert(S.pendingShares('sc0082').length === 3, `待接收分享數唔啱（${S.pendingShares('sc0082').length}）`);
+  main.boot();
+  fireHash(w, '#/notices');
+  assert(!document.getElementById('view').textContent.includes(title), '未接收嘅分享竟然出現喺通告');
+
+  fireHash(w, '#/shares');
+  const v = document.getElementById('view');
+  assert(v.textContent.includes(title), '分享中心冇見到待接收');
+  v.querySelector('[data-ok="sh-1"]').click();
+  assert(S.shares().find(x => x.id === 'sh-1').state === 'accepted', '接收冇寫入');
+  assert(S.shares().find(x => x.id === 'sh-1').decidedBy, '接收冇記低邊個決定');
+
+  fireHash(w, '#/notices');
+  const t = document.getElementById('view').textContent;
+  assert(t.includes(title), '接收咗嘅分享冇出現喺通告');
+  assert(t.includes('來自') && t.includes('深資童軍團'), '冇標明來源');
+});
+
+await test('分享：退回要留紀錄（邊個決定、理由）', async () => {
+  A.loginAs('u-m-minor');
+  main.boot();
+  fireHash(w, '#/shares');
+  document.getElementById('view').querySelector('[data-no="sh-2"]').click();
+  const dlg = document.querySelector('.mask');
+  dlg.querySelector('#sh-why').value = '本團已經有營幕';
+  dlg.querySelector('[data-save]').click();
+  const sh = S.shares().find(x => x.id === 'sh-2');
+  assert(sh.state === 'declined', '退回冇寫入');
+  assert(sh.decideNote === '本團已經有營幕', '冇記低理由');
+  assert(sh.decidedBy === '陳家欣', '冇記低邊個決定');
+});
+
+await test('分享：普通團員（rank 2）睇得到但唔夠權決定，只可以加註解', async () => {
+  A.loginAs('u-m-scout');
+  main.boot();
+  fireHash(w, '#/shares');
+  const v = document.getElementById('view');
+  assert(v.textContent.includes('執委或以上'), '冇提示決定權不足');
+  assert(!v.querySelector('[data-ok]'), 'rank 2 竟然撳得接收');
+  assert(!v.querySelector('[data-no]'), 'rank 2 竟然撳得退回');
+  const note = v.querySelector('[data-note]');
+  assert(note, 'rank 2 冇「加註解」掣');
+  note.click();
+  const dlg = document.querySelector('.mask');
+  dlg.querySelector('#sh-note2').value = '可以收，但要問家長';
+  dlg.querySelector('[data-save]').click();
+  const sh = S.shares().find(x => x.suggest);
+  assert(sh && sh.suggest.by === '林浩然', '註解冇記低邊個留');
+  assert(sh.state === 'pending', '加註解竟然當咗決定');
+});
+
+await test('分享：物主／團長可以撤回未接收嘅分享', async () => {
+  A.loginAs('u-b-leader');           // 幼童軍團長（收到童軍團 sh-5 已接收）
+  main.boot();
+  fireHash(w, '#/shares?tab=accepted');
+  assert(document.getElementById('view').textContent.includes('童軍棍'), '已接收清單唔見 sh-5');
+  A.loginAs('u-m-exec');             // 深資執委（物主）撤回自己發出嘅
+  main.boot();
+  fireHash(w, '#/shares?tab=sent');
+  const btn = document.getElementById('view').querySelector('[data-pull="sh-7"]');
+  assert(btn, '物主冇撤回掣');
+  btn.click();
+  assert(S.shares().find(x => x.id === 'sh-7').state === 'withdrawn', '撤回冇寫入');
+});
+
+await test('★ 旅入口＝支部入口：支部人員由旅閘登入即入自己支部（冇第二次登入）', async () => {
+  S.clearSession();
+  const r = A.login('sc-scout@demo.troop', A.DEMO_PASSWORD);
+  assert(r.ok, '支部人員由旅閘登入失敗');
+  const sess = S.getSession();
+  assert(sess.role === 'member' && sess.branchId === 'sc0082', '登入後 session 冇帶支部');
+  assert(sess.landedIn === 'sc0082', '冇記錄「直接入咗自己支部」');
+  main.boot();
+  const t = document.body.textContent;
+  assert(t.includes('童軍團'), '登入後冇顯示自己支部');
+  assert(t.includes('通告') && t.includes('行事曆'), '登入後冇入到支部嘅模組清單');
+});
+
+await test('換第二個團：仍然經同一個旅入口（毋須搵第二個網址）', async () => {
+  S.clearSession();
+  main.boot();
+  globalThis.location.search = '?step=branch';
+  main.boot();
+  const t = text();
+  assert(t.includes('先揀你嘅團'), '揀團頁唔見');
+  assert(t.includes('揀呢個團'), '揀團掣唔見');
+  globalThis.location.search = '';
+  S.clearSession();
 });
 
 await test('帳號選單＋改密碼流程', async () => {

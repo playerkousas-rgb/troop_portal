@@ -83,7 +83,7 @@ export function renderDetail(el, { id }, query = {}) {
   const role = S.getSession()?.role;
 
   const tabsHtml = `<div class="tabs">
-    ${[['overview', '概覽'], ['link', '接駁與登記'], ['account', '開戶與權限'], ['public', '公開資料'], ['finance', '財務摘要'], ['inventory', '物資'], ['progress', '進度摘要'], ['members', '名冊']]
+    ${[['overview', '概覽'], ['shares', '分享'], ['link', '接駁與登記'], ['account', '開戶與權限'], ['public', '公開資料'], ['finance', '財務摘要'], ['inventory', '物資'], ['progress', '進度摘要'], ['members', '名冊']]
       .map(([k, l]) => `<button class="${k === tab ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}
   </div>`;
 
@@ -125,6 +125,33 @@ export function renderDetail(el, { id }, query = {}) {
           { cells: ['公開資料', `${visName(b.publicRank)}`] }
         ]
       }) })}
+    `;
+  } else if (tab === 'shares') {
+    /* ★ 該支部嘅分享：收到（要佢決定）＋ 發出 */
+    const inb = S.sharesToMe(b.id), out = S.sharesFromMe(b.id);
+    body = `
+    ${notice('★ <b>收件方決定</b>：呢一頁睇該支部收到／發出嘅分享。收到嘅要<b>該支部接收</b>先會出現喺佢自己嘅清單（未接收＝淨係喺分享中心）；退回會留紀錄。旅長可以代決定，但會記低係邊個落。', 'info')}
+    <div class="grid g3 mt-12">
+      ${stat({ k: '待接收', v: inb.filter(x => x.state === 'pending').length, u: '項', tone: inb.some(x => x.state === 'pending') ? 'warn' : 'ok' })}
+      ${stat({ k: '已接收', v: inb.filter(x => x.state === 'accepted').length, u: '項', tone: 'ok' })}
+      ${stat({ k: '呢個支部發出', v: out.length, u: '項' })}
+    </div>
+    ${card({ title: '收到嘅分享', body: table({
+      cls: 'tbl compact', head: ['內容', '來自', '等級', '狀態', '邊個決定'],
+      rows: inb.map(x => ({
+        cells: [esc(x.title), esc(S.branchName(x.from)), visName(x.level),
+          { pending: badge('待接收', 'y', true), accepted: badge('已接收', 'g', true), declined: badge('已退回', 'n', true), withdrawn: badge('已撤回', 'r', true) }[x.state] || x.state,
+          x.decidedBy ? `${esc(x.decidedBy)}<div class="xs faint">${esc(x.decidedAt || '')}</div>` : '—']
+      })), empty: '冇收到分享'
+    }) })}
+    ${card({ title: '呢個支部發出嘅分享', body: table({
+      cls: 'tbl compact', head: ['內容', '去邊', '等級', '狀態', '對方決定'],
+      rows: out.map(x => ({
+        cells: [esc(x.title), x.to === 'all' ? '全旅' : esc(S.branchName(x.to)), visName(x.level),
+          { pending: badge('等對方接收', 'y', true), accepted: badge('已接收', 'g', true), declined: badge('已退回', 'n', true), withdrawn: badge('已撤回', 'r', true) }[x.state] || x.state,
+          x.decidedBy ? esc(x.decidedBy) + (x.decideNote ? `<div class="xs faint">理由：${esc(x.decideNote)}</div>` : '') : '—']
+      })), empty: '未發出分享'
+    }) })}
     `;
   } else if (tab === 'link') {
     body = `

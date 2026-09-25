@@ -167,6 +167,17 @@ export const MODULES = [
     ]
   },
   {
+    id: 'shares', label: '分享中心', icon: 'share', group: 'integ', tier: 'P1', order: 105,
+    roles: ['chief', 'coach', 'member'], defaultOn: true, badge: s => s.sharesPending,
+    desc: '★ 收件方決定：其他支部 share 嚟嘅嘢，要你哋接收先會出現喺你嘅清單；未接收只喺「待接收」。',
+    subs: [
+      { id: 'shares-inbox', label: '待接收' },
+      { id: 'shares-accepted', label: '已接收' },
+      { id: 'shares-sent', label: '我哋發出' },
+      { id: 'shares-rules', label: '分享規矩' }
+    ]
+  },
+  {
     id: 'docs', label: '教學', icon: 'book', group: 'sys', tier: 'P3', order: 120,
     roles: ['chief', 'coach', 'parent', 'member'], defaultOn: true,
     desc: '三層教材：每角色快速入門、每模組說明、開旅 checklist；加「功能藍圖」。成個系統只有呢一個「教學」入口。'
@@ -294,17 +305,19 @@ export const ageGroupOf = dob => {
    權限（前端只係提示；真正授權永遠喺 server-side）
    ============================================================ */
 const PERMS = {
-  chief: ['view_all', 'branch_view', 'branch_link_edit', 'open_account_downstream', 'notice_publish', 'calendar_edit',
+  chief: ['view_all', 'branch_view', 'share_decide', 'share_send', 'branch_link_edit', 'open_account_downstream', 'notice_publish', 'calendar_edit',
     'finance_view', 'finance_confirm', 'inventory_all', 'transfer_all', 'user_manage', 'identity_manage',
     'invite_create', 'public_edit', 'module_toggle', 'system_all', 'audit_view', 'enter_any_branch'],
-  coach: ['branch_view', 'enter_granted_branch', 'notice_publish', 'calendar_edit', 'finance_view', 'finance_submit_troop',
+  coach: ['branch_view', 'enter_granted_branch', 'share_decide', 'share_send', 'notice_publish', 'calendar_edit', 'finance_view', 'finance_submit_troop',
     'inventory_all', 'transfer_view', 'user_view', 'public_edit', 'audit_view'],
-  parent: ['children_view', 'notice_view', 'calendar_view'],
-  member: ['self_view', 'notice_view', 'calendar_view', 'branch_own'],
+  parent: ['children_view', 'notice_view', 'calendar_view', 'share_send'],
+  member: ['self_view', 'notice_view', 'calendar_view', 'branch_own', 'share_decide', 'share_send'],
   super: ['platform_all', 'enter_any_branch', 'audit_view'],
   guest: ['public_view']
 };
 export const can = (role, perm) => (PERMS[role] || []).includes(perm);
+/** ★ 分享嘅接收／退回：該支部執委或以上（rank ≥ 3）；旅長／教練員可以代勞 */
+export const canDecideShare = (role, rank = 0) => ['chief', 'coach'].includes(role) || Number(rank) >= 3;
 export const PERMS_OF = role => (PERMS[role] || []).slice();
 /** 權限總表用：角色欄 ＋ 權限清單（中文標籤） */
 export const MODULE_ROLE_COLS = ['chief', 'coach', 'parent', 'member'];

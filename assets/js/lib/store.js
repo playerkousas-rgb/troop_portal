@@ -56,6 +56,11 @@ export function clearSession() {
 export function setPref(k, v) { prefs[k] = v; write(K_PREFS, prefs); notify(); }
 
 /** 改動資料（只改本機）：mutator 直接改 draft，之後 markDirty */
+function nowStr() {
+  const n = new Date(), p = x => String(x).padStart(2, '0');
+  return `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())} ${p(n.getHours())}:${p(n.getMinutes())}`;
+}
+
 export function commit(mutator, { markDirty = true, silent = false } = {}) {
   const d = load();
   mutator(d);
@@ -184,6 +189,44 @@ export function calendarForViewer() {
   return d.calendar.filter(e => e.cal === 'troop' || canSeeBranch({ id: e.cal }));
 }
 
+/* ---------------- 分享（★ 新方向：收件方決定出唔出） ----------------
+   規矩：A 團 share 去 B 團 → B 團自己決定「要唔要佢出現」。
+       未接收 = 淨係喺 B 團嘅「分享中心 · 待接收」見到；接收先會混入 B 團自己嘅清單。
+       接收／退回要有該支部嘅決定權（執委或以上）；旅長可以代勞，但會記邊個落嘅決定。
+   ------------------------------------------------------------ */
+export const shares = () => load().shares || [];
+/** 發去我支部（或全旅）嘅分享 */
+export const sharesToMe = (branchId = myBranchId()) => shares().filter(s => s.to === branchId || s.to === 'all');
+/** 我支部發出嘅分享 */
+export const sharesFromMe = (branchId = myBranchId()) => shares().filter(s => s.from === branchId);
+export const pendingShares = (branchId = myBranchId()) => sharesToMe(branchId).filter(s => s.state === 'pending');
+/** 已接收（＝真係會出現喺我清單） */
+export const acceptedShares = (branchId = myBranchId(), kind = null) =>
+  sharesToMe(branchId).filter(s => s.state === 'accepted' && (!kind || s.kind === kind));
+export const KIND_LABEL = { notice: '通告', event: '活動', item: '物資', progress: '進度／成果', album: '相簿', doc: '教材' };
+export function decideShare(id, state, note = '') {
+  const u = currentUser();
+  return commit(d => {
+    const s = (d.shares || []).find(x => x.id === id);
+    if (!s) return;
+    s.state = state;                       // accepted ／ declined ／ withdrawn
+    s.decidedBy = u?.name || getSession()?.email || '';
+    s.decidedAt = nowStr();
+    if (note) s.decideNote = note;
+  });
+}
+export function addShare({ kind, title, from, to, level = 2, note = '', ref = '' }) {
+  const u = currentUser();
+  const id = 'sh-' + Date.now();
+  commit(d => {
+    (d.shares = d.shares || []).unshift({
+      id, kind, title, from, to, level, note, ref,
+      state: 'pending', at: nowStr(), by: u?.name || getSession()?.email || ''
+    });
+  });
+  return id;
+}
+
 /* ---------------- 計數（導航徽章／儀表板） ---------------- */
 export function pendingList() {
   const d = load();
@@ -198,6 +241,8 @@ export function counters() {
     loanPending: (d.inventory || []).reduce((n, i) => n + (i.loans || []).filter(l => l.state === 'pending').length, 0),
     transferPending: (d.transfers || []).filter(t => t.state === 'pending').length,
     usersPending: (d.users || []).filter(u => u.status === 'pending' && !u.hidden).length,
+    sharesPending: pendingShares().length,
+    sharesSentPending: sharesFromMe().filter(s => s.state === 'pending').length,
     systemAlerts: (d.branches || []).filter(b => b.link.state !== 'green').length + (d.backend?.broken?.length || 0)
   };
 }

@@ -115,6 +115,12 @@ export const DEMO_USERS = [
     branchAccess: ['sc0082'], status: 'active', mustChangePw: false, at: '2026-09-12 15:00', lastLogin: '2026-09-20 16:05'
   },
   {
+    id: 'u-m-scout', role: 'member', name: '林浩然', email: 'sc-scout@demo.troop', phone: '',
+    title: '童軍團員（18+）', anchor: '童軍團 SHEET（sc0082）', ageGroup: 'adult',
+    branchId: 'sc0082', ymis: 'YMIS-2003', identity: '團員', consent: true,
+    branchAccess: ['sc0082'], status: 'active', mustChangePw: false, at: '2026-09-01 10:00', lastLogin: '2026-09-22 19:40'
+  },
+  {
     id: 'u-parent2', role: 'parent', name: '林美好', email: 'lam@demo.troop', phone: '9567 8901',
     title: '家長', anchor: '旅 SHEET', ageGroup: 'adult',
     children: ['YMIS-2003'], branchAccess: [], status: 'pending', mustChangePw: true, at: '2026-09-24 18:30', lastLogin: '—',
@@ -300,6 +306,17 @@ export const DEMO_INVITES = [
   { id: 'iv-3', kind: 'member', role: '副團長', email: 'newdeputy@demo.troop', token: 'TROOP-MEM-9A1C3E5G', branchId: 'cs0082', identity: '副團長', branchAccess: ['cs0082'], expires: D(0), used: true, createdBy: '陳大文', at: D(-2) + ' 10:00', usedAt: D(-1) + ' 14:30' }
 ];
 
+/** 分享（★ 收件方決定：A 團 share 去 B 團，B 團自己決定要唔要佢出現） */
+export const DEMO_SHARES = [
+  { id: 'sh-1', kind: 'notice', title: '深資童軍：「黑夜行」活動通告', from: 'vs0082', to: 'sc0082', level: 2, note: '想邀請童軍團一齊行（名額 8 個）', state: 'pending', at: D(-1) + ' 20:10', by: '郭嘉敏' },
+  { id: 'sh-2', kind: 'item', title: '營幕 ×4、營燈 ×2（可外借）', from: 'vs0082', to: 'sc0082', level: 2, note: '露營用品，9 月至 11 月可借', state: 'pending', at: D(-2) + ' 17:45', by: '陳家豪' },
+  { id: 'sh-3', kind: 'notice', title: '旅團服務日：沙田公園清潔', from: 'troop', to: 'all', level: 0, state: 'accepted', at: D(-4) + ' 09:00', by: '陳大文', decidedBy: '系統（旅層等級 0 = 自動）', decidedAt: D(-4) + ' 09:00' },
+  { id: 'sh-4', kind: 'event', title: '2026 旅露營（全旅）', from: 'troop', to: 'all', level: 2, state: 'accepted', at: D(-6) + ' 14:20', by: '陳大文', decidedBy: '李美儀', decidedAt: D(-6) + ' 15:00' },
+  { id: 'sh-5', kind: 'item', title: '童軍棍 ×40（可外借）', from: 'sc0082', to: 'cs0082', level: 2, state: 'accepted', at: D(-8) + ' 11:00', by: '陳家欣', decidedBy: '鄭美玲', decidedAt: D(-7) + ' 09:30' },
+  { id: 'sh-6', kind: 'album', title: '小隊露營相簿（2026 夏）', from: 'sc0082', to: 'vs0082', level: 2, state: 'declined', at: D(-9) + ' 16:00', by: '陳家欣', decidedBy: '郭嘉敏', decidedAt: D(-8) + ' 12:10', decideNote: '相內有未成年成員，未收齊家長同意 → 暫不接收' },
+  { id: 'sh-7', kind: 'progress', title: '深資童軍專科章成果（2026 Q3）', from: 'vs0082', to: 'all', level: 3, state: 'pending', at: D(-1) + ' 21:30', by: '郭嘉敏', note: '想收錄入旅公開資料（要旅長批）' }
+];
+
 /** 模組開關（TROOP_MODULES：模組 × 全旅／指定支部） */
 export const DEMO_MODULES = {};   // 由 registry 預設填充，state 只存 override
 
@@ -408,6 +425,7 @@ export function makeDemo() {
     publicProfile: JSON.parse(JSON.stringify(DEMO_PUBLIC)),
     applications: JSON.parse(JSON.stringify(DEMO_APPLICATIONS)),
     invites: JSON.parse(JSON.stringify(DEMO_INVITES)),
+    shares: JSON.parse(JSON.stringify(DEMO_SHARES)),
     modules: {},                      // { moduleId: 'all' | 'off' | [branchId,…] }
     audit: JSON.parse(JSON.stringify(DEMO_AUDIT)),
     access: JSON.parse(JSON.stringify(DEMO_ACCESS_LOG)),

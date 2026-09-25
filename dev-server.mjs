@@ -107,7 +107,8 @@ server.listen(PORT, HOST, () => {
   家長          parent@demo.troop
   支部人員      cs-leader@demo.troop（團長）/ cs-deputy@demo.troop（副團長）
                 vs-exec@demo.troop（執委·主席）/ vs-team@demo.troop（團隊長·18+）
-                sc-cpl@demo.troop（副隊長·未夠 18）   ← 入之前要先揀團
+                sc-cpl@demo.troop（副隊長·未夠 18）／sc-scout@demo.troop（團員·18+）
+                ← 支部人員入之前要先揀團；登入後直接入自己支部（旅入口＝支部入口）
   超管（隱藏）  index.html?step=super  或旅閘撳 ⚜ 五下 → super@platform.local`);
   console.log(`/api/* 暫時回 501（UI 先行，後端未實作）\n`);
 });

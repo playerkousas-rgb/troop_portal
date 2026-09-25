@@ -20,9 +20,24 @@ export function render(el, params, query = {}) {
   if (q) rows = rows.filter(n => (n.title + n.body).toLowerCase().includes(q));
   rows = rows.slice().sort((a, b) => String(b.at).localeCompare(String(a.at)));
 
+  /* ★ 已接收嘅分享（其他支部／旅 share 嚟、你哋接收咗）—— 混入清單、標明來源 */
+  const shared = S.acceptedShares(S.myBranchId(), 'notice').filter(x => x.from !== S.myBranchId());
+
   const cats = Array.from(new Set(all.map(n => n.category).filter(Boolean)));
   const body = `
-  ${notice('通告頁 = 本單位通告 ＋ <b>你已訂閱嘅圖書館通告</b>（同頁同列表、來源標示、附件指返圖書館）。分享俾其他支部之前，對方一定要有<b>通告模組</b>（由註冊表過濾）。', 'info')}
+  ${notice('通告頁 = 本單位通告 ＋ <b>你已訂閱嘅圖書館通告</b> ＋ <b>已接收嘅分享</b>（同頁同列表、來源標示）。分享俾其他支部之前，對方一定要有<b>通告模組</b>（由註冊表過濾）；★ 對方<b>接收咗先會出現</b>喺度（未接收＝喺「分享中心 · 待接收」）。', 'info')}
+  ${shared.length ? card({
+    title: `來自其他支部（${shared.length}）`, sub: '你哋接收咗嘅分享 —— 標明來源，可去分享中心收回',
+    body: `<div class="grid" style="gap:10px">${shared.map(x => `
+      <div class="pub-notice">
+        <div class="flex-b"><div class="grow">
+          <div class="flex-w" style="gap:6px"><span class="bold lg">${esc(x.title)}</span>
+            <span class="tag b sm">來自 ${esc(S.branchName(x.from))}</span>
+            <span class="tag n sm">可見 ${visName(x.level)}</span></div>
+          <div class="xs faint mt-4">${esc(x.note || '')} · 由 ${esc(x.by || '')} 發出 · 接收：${esc(x.decidedBy || '')} ${esc(x.decidedAt || '')}</div>
+        </div><div class="btn-row no-print"><a class="btn sm" href="#/shares?tab=accepted">分享中心</a></div></div>
+      </div>`).join('')}</div>`
+  }) : ''}
   ${toolbar(`
     ${searchBox('nt-q', '搜尋標題／內容…')}
     ${selectBox('nt-scope', [{ v: 'all', l: '全部來源' }, { v: 'troop', l: '旅通告' }, { v: 'branch', l: '支部通告' }], scope)}

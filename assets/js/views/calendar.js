@@ -11,6 +11,12 @@ export function render(el, params, query = {}) {
   const month = query.m || todayISO().slice(0, 7);
   const on = (query.on ? query.on.split(',') : ['troop', ...d.branches.filter(b => S.canSeeBranch(b)).map(b => b.id)]).filter(Boolean);
   const events = S.calendarForViewer().filter(e => on.includes(e.cal));
+  /* ★ 已接收嘅活動分享（收件方接收咗先會出現） */
+  const sharedEv = S.acceptedShares(S.myBranchId(), 'event').filter(x => x.from !== S.myBranchId());
+  const sharedRows = sharedEv.map(x => ({
+    date: x.at.slice(0, 10), title: `【來自 ${S.branchName(x.from)}】${x.title}`,
+    cal: x.from, time: '', place: ''
+  }));
   const [y, mm] = month.split('-').map(Number);
   const first = new Date(y, mm - 1, 1);
   const startDow = first.getDay();
@@ -51,11 +57,13 @@ export function render(el, params, query = {}) {
       cls: 'tbl compact', head: ['日期', '活動', '日曆', '時間', '地點'],
       rows: events.filter(e => e.date.startsWith(month)).sort((a, b) => a.date.localeCompare(b.date)).map(e => ({
         cells: [esc(fmtDate(e.date, true)), esc(e.title), `<span class="swatch" style="background:${e.color}"></span> ${esc(S.branchName(e.cal))}`, esc(e.time || ''), esc(e.place || '')]
-      })), empty: '本月冇活動'
+      })).concat(sharedRows.map(x => ({
+        cells: [esc(fmtDate(x.date, true)), esc(x.title), `<span class="tag b sm">分享</span> ${esc(S.branchName(x.cal))}`, '—', '—']
+      }))), empty: '本月冇活動'
     }) })}
     ${card({ title: '標籤過濾', sub: '事件帶支部自訂標籤', body: `
       <div class="flex-w">${Array.from(new Set(S.calendarForViewer().map(e => S.branchName(e.cal)))).map(t => `<span class="chip">#${esc(t)}</span>`).join('')}</div>
-      <div class="mt-12">${notice('旅日曆同支部日曆係<b>兩層</b>：支部自己出嘅活動留喺支部；旅只放旅層活動（旅露營、旅務會議、聯合服務）。', 'info')}</div>` })}
+      <div class="mt-12">${notice('旅日曆同支部日曆係<b>兩層</b>：支部自己出嘅活動留喺支部；旅只放旅層活動（旅露營、旅務會議、聯合服務）。★ 其他支部嘅活動要<b>你哋接收咗分享</b>先會出現（標明「來自 XX 團」）。', 'info')}</div>` })}
   </div>
   `;
   el.innerHTML = page({ title: '行事曆', sub: `${d.branches.length + 1} 個日曆 · 本月 ${events.filter(e => e.date.startsWith(month)).length} 項活動`, body });

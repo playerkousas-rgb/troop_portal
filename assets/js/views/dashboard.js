@@ -144,18 +144,28 @@ function renderMemberDash(el) {
   const notices = S.noticesForViewer().filter(n => n.status === 'published').slice(0, 4);
   const soon = S.calendarForViewer().filter(e => e.date >= todayISO()).sort((a, b2) => a.date.localeCompare(b2.date)).slice(0, 4);
   const isLeader = S.isBranchLeader();
+  const pend = S.pendingShares(s.branchId);
   const body = `
   ${chips([
     { k: '團', v: esc(b?.name || '—') },
     { k: '身份', v: esc(s.identity || '—'), tone: 'ok' },
     ...(s.title ? [{ k: '職稱', v: esc(s.title) }] : []),
     { k: '年齡組', v: s.ageGroup === 'adult' ? '18+' : '未夠 18', tone: s.ageGroup === 'adult' ? 'ok' : 'warn' },
-    { k: '支部接駁', v: st.state === 'green' ? '綠' : st.state === 'yellow' ? '黃' : '紅', tone: st.state === 'green' ? 'ok' : st.state === 'yellow' ? 'warn' : 'danger' }
+    { k: '支部接駁', v: st.state === 'green' ? '綠' : st.state === 'yellow' ? '黃' : '紅', tone: st.state === 'green' ? 'ok' : st.state === 'yellow' ? 'warn' : 'danger' },
+    { k: '待接收分享', v: pend.length, tone: pend.length ? 'warn' : 'ok' }
   ])}
   ${notice(st.ok ? esc(st.note) : esc(st.msg), st.ok ? (st.state === 'green' ? 'ok' : 'warn') : 'err')}
   ${notice(`你嘅帳號住 <b>${esc(b?.name || '')} 嘅支部 SHEET</b>：名冊、進度、內部文件嘅正本都喺嗰度；旅只放行你身份睇得到嘅摘要。
     <div class="mt-8"><a class="btn sm primary" href="#/mine">${icon('child', 13)} 我嘅身份卡同權限</a>
     <a class="btn sm" href="#/notices">通告</a><a class="btn sm" href="#/calendar">行事曆</a>${isLeader ? '<a class="btn sm" href="#/branches">支部（團長／副團長）</a>' : ''}</div>`, 'info')}
+  ${fold({
+    title: '需要你（你支部）決定', sub: pend.length ? `${pend.length} 項分享等緊接收／退回` : '冇待接收分享',
+    open: pend.length > 0, body: pend.length
+      ? `<div class="grid" style="gap:8px">${pend.map(x => `<div class="flex-b mb-8"><div class="grow"><b class="sm">${esc(x.title)}</b>
+          <div class="xs faint">${esc(S.KIND_LABEL[x.kind] || x.kind)} · 來自 ${esc(S.branchName(x.from))} · 由 ${esc(x.by || '')} 發出${x.note ? ' · ' + esc(x.note) : ''}</div></div>
+          <a class="btn sm primary" href="#/shares">去決定</a></div>`).join('')}</div>`
+      : '<div class="empty">冇人 share 未決定嘅嘢畀你支部</div>'
+  })}
   ${fold({ title: '我嘅通告同活動', sub: `${notices.length} 通告 · ${soon.length} 活動`, open: true, body: `
     <div class="grid g2">
       ${card({ title: '通告', body: notices.length ? notices.map(n => `<div class="mb-8"><a href="#/notice/${n.id}" class="bold sm">${esc(n.title)}</a><div class="xs faint">${esc(n.scope === 'troop' ? '旅通告' : S.branchName(n.ownerBranch) + ' 通告')}</div></div>`).join('') : '<div class="empty">冇通告</div>' })}
@@ -165,6 +175,7 @@ function renderMemberDash(el) {
     <div class="grid g3">
       ${card({ title: '進度', body: S.load().progress[s.ymis] ? progressBar(S.load().progress[s.ymis].awardPct, `${S.load().progress[s.ymis].award} ${S.load().progress[s.ymis].awardPct}%`) : '<div class="empty">未對上進度紀錄</div>' })}
       ${card({ title: '物資', body: `<div class="sm">本團可借 ${S.load().inventory.filter(i => i.owner === s.branchId || i.scope !== 'self').length} 項</div><a class="btn sm mt-8" href="#/inventory">睇物資</a>` })}
+      ${card({ title: '分享', body: `<div class="sm">已接收 ${S.acceptedShares(s.branchId).length} 項 · 待接收 ${pend.length} 項</div><a class="btn sm mt-8" href="#/shares">分享中心</a>` })}
       ${card({ title: '繳費', body: `<div class="sm">${esc((S.load().financeSubmits.find(f => f.branchId === s.branchId)?.state === 'accepted') ? '已提交' : '未提交／待確認')}</div><div class="xs faint">明細住自己團</div>` })}
     </div>` })}
   `;

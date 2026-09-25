@@ -28,6 +28,7 @@ import * as vUsers from './views/users.js';
 import * as vPublic from './views/public.js';
 import * as vChildren from './views/children.js';
 import * as vMine from './views/mine.js';
+import * as vShares from './views/shares.js';
 import * as vSystem from './views/system.js';
 import * as vPlatform from './views/platform.js';
 import * as vDocs from './views/docs.js';
@@ -39,6 +40,7 @@ const viewEl = () => document.getElementById('view');
 route('', () => vDashboard.render(viewEl()));
 route('dashboard', () => vDashboard.render(viewEl()));
 route('mine', () => vMine.render(viewEl()));
+route('shares', (p, q) => vShares.render(viewEl(), p, q));
 route('pending', (p, q) => vPending.render(viewEl(), p, q));
 route('branches', () => vBranches.render(viewEl()));
 route('branch/:id', (p, q) => vBranches.renderDetail(viewEl(), p, q));
@@ -378,7 +380,7 @@ function renderBranchLogin(gate, q) {
         <div class="faint sm">${esc(b.section)} · <span class="tag ${st.state === 'green' ? 'g' : 'y'} sm">${st.state === 'green' ? '已接駁' : '已登記 · 未閂口'}</span></div>
       </div>
       <div class="card pad-l">
-        ${noticeBox('你嘅密碼由<b>呢個團嘅後端</b>核對（旅系統唔會、亦唔可以代驗）。示範模式用以下帳號試身份差異：')}
+        ${noticeBox('★ <b>旅入口＝你嘅支部入口</b>：揀咗團，登入之後就直接入到<b>你支部個世界</b>（名冊、自己團通告、活動、物資），只係多咗「其他支部 share 俾你」嘅嘢 —— 唔使你另開一個支部系統、亦唔使再登多次。示範模式用以下帳號試身份差異：')}
         <div class="login-tabs mt-8">
           ${logins.map(l => `<button class="chip" data-demo="${l.userId}" title="${esc(l.desc)}">${icon('key', 12)} ${esc(l.label)}</button>`).join('')}
         </div>
@@ -388,7 +390,7 @@ function renderBranchLogin(gate, q) {
         <div id="lg-err"></div>
         <button class="btn primary block mt-8" id="lg-go">${icon('arrowR', 15)} 入 ${esc(b.name)}</button>
         <hr>
-        <div class="xs faint">真模式會轉去該團入口 <span class="mono">${esc(b.id)}/members.html?u=${esc(b.code || b.id)}</span>；成員、團長、副團長都係用同一個入口（權限跟身份：團長／副團長 → 支部管理；成員 → 自己紀錄）。</div>
+        <div class="xs faint">登入之後：儀表板（你支部嘅嘢）＋「我的支部」（身份卡／監護／家長同意）＋「分享中心」（其他支部 share 咗乜畀你，你決定收唔收）。成員、團長、副團長都係<b>同一個旅入口</b>（權限跟身份：團長／副團長 → 支部管理；成員 → 自己紀錄）。</div>
       </div>
       <div class="grid g2 mt-12">
         <button class="unit-card" id="switch"><span class="emblem">${icon('refresh', 20)}</span><span class="grow"><span class="bold">揀第二個團</span><br><span class="xs faint">${d.branches.length} 個支部</span></span></button>
@@ -420,6 +422,7 @@ function bindLoginForm(gate, logins, opts = {}) {
     if (opts.keepBranch && ymisEl?.value.trim()) {
       S.setSession({ ...S.getSession(), ymis: normId(ymisEl.value.trim()) });
     }
+
     if (r.mustChangePw) sessionStorage.setItem('troop.mustPw', '1');
     location.href = location.pathname + (location.hash || '');
   };

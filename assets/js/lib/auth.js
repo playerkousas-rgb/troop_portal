@@ -32,7 +32,8 @@ export const DEMO_BRANCH_LOGINS = [
   { userId: 'u-b-leader2', email: 'cs-deputy@demo.troop', role: 'member', branchId: 'cs0082', identity: '副團長', label: '副團長', desc: '黃志強 · 幼童軍團' },
   { userId: 'u-m-exec', email: 'vs-exec@demo.troop', role: 'member', branchId: 'vs0082', identity: '執委', title: '主席', label: '執委（主席）', desc: '郭嘉敏 · 深資童軍團 · 18+' },
   { userId: 'u-m-adult', email: 'vs-team@demo.troop', role: 'member', branchId: 'vs0082', identity: '團隊長', label: '團隊長（18+）', desc: '陳家豪 · 深資童軍團' },
-  { userId: 'u-m-minor', email: 'sc-cpl@demo.troop', role: 'member', branchId: 'sc0082', identity: '副隊長', label: '副隊長（未夠 18）', desc: '陳家欣 · 童軍團 · 監護人：陳小萍' }
+  { userId: 'u-m-minor', email: 'sc-cpl@demo.troop', role: 'member', branchId: 'sc0082', identity: '副隊長', label: '副隊長（未夠 18）', desc: '陳家欣 · 童軍團 · 監護人：陳小萍' },
+  { userId: 'u-m-scout', email: 'sc-scout@demo.troop', role: 'member', branchId: 'sc0082', identity: '團員', label: '團員（18+）', desc: '林浩然 · 童軍團 · 普通成員（睇得到但唔夠權決定分享）' }
 ];
 
 /** 超管：隱藏帳號 —— 唔喺名單、唔喺登入頁 chips，要 ?step=super 或撳 ⚜ 五下 */
@@ -62,7 +63,9 @@ export function login(email, password) {
     identity: u.identity || (member ? member.identity : '') || '',
     title: u.memberTitle || (member ? member.title : '') || '',
     ageGroup: u.ageGroup || ageGroupOf(member?.dob),
-    mustChangePw: !!u.mustChangePw, at: Date.now(), via: 'local'
+    mustChangePw: !!u.mustChangePw, at: Date.now(), via: 'local',
+    /* ★ 旅入口＝支部入口：支部人員一登入就已經「企喺自己支部」 */
+    landedIn: u.role === 'member' ? (u.branchId || '') : ''
   });
   commit(d => {
     const t = d.users.find(x => x.id === u.id);

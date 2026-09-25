@@ -95,6 +95,7 @@ export function fyOf(dateISO) {
 /* ---------- 圖示（inline SVG，零依賴） ---------- */
 const ICONS = {
   home: 'M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z',
+  share: 'M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v12M8 7l4-4 4 4',
   calendar: 'M4 6h16v14H4zM8 3v4M16 3v4M4 10h16',
   megaphone: 'M3 11v3l12 5V6L3 11zM15 8a4 4 0 0 1 0 8',
   branch: 'M12 3v5M12 12v3M6 21v-4M18 21v-4M12 15a6 6 0 0 0-6 6M12 15a6 6 0 0 1 6 6M12 8a3 3 0 1 0 0-5 3 3 0 0 0 0 5z',
