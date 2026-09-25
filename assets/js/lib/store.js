@@ -9,7 +9,7 @@
 
 import { makeDemo } from './demo.js';
 import { deepClone, toast } from './util.js';
-import { defaultRankFor, gateOfLink, gateAllowsLocalLogin } from './registry.js';
+import { defaultRankFor, gateOfLink } from './registry.js';
 
 const K_DATA = 'troop.demo.db.v1';
 const K_SESSION = 'troop.session.v1';
@@ -144,12 +144,7 @@ export function setBranchGate(branchId, gate, { note = '', by = null, silent = f
     t.link.note = gate === 'open' ? '支部系統自己登入得（旅入口亦入得）' : '閂咗支部系統登入：只經旅入口';
     /* 真模式：下游寫入會回 confirmed → 下游真相跟住旅側記錄走（示範：直接同步） */
     const dn = (d.downstream || {})[branchId];
-    if (dn) { dn.localLogin = gate === 'open'; dn.escOpened = false; }
-    /* 旅側重新拍板 ＝ 逃生門嗰件事已經處理（留低紀錄，唔再標示 ⚠） */
-    if (t.link.esc) {
-      t.link.escAck = { at, by: u?.name || '', mode: gate === 'open' ? 'accept' : 'relock' };
-      t.link.esc = null;
-    }
+    if (dn) dn.localLogin = gate === 'open';
   }, { markDirty: true, silent });
   return { ok: true, at, by: u?.name || '', result: res };
 }
@@ -159,36 +154,57 @@ export const branchGate = branchId => {
   return b ? gateOfLink(b.link) : 'open';
 };
 
-/* ---------------- ★ 防死鎖：逃生門（單向） ---------------- */
-/** 逃生門鑰匙持有人 ＝ 該下游 Sheet／Apps Script 專案擁有者（旅側死咗都救得返嘅唯一人） */
-export const escOwner = branchId => load().downstream?.[branchId]?.escOwner || null;
-export function setEscOwner(branchId, { email = '', note = '' } = {}) {
-  const u = currentUser();
+/* ---------------- ★ 求救制（取代逃生門；用戶定案 2026-09-25） ----------------
+   求救＝**請求**：送得出去、睇得到、有人跟 —— 但唔會自動開任何嘢。
+   處理（開返閘／重設密碼／答覆）全部由 ADMIN 人手做，逐單留紀錄。 */
+export const rescues = () => load().rescues || [];
+export const rescueById = id => rescues().find(r => r.id === id) || null;
+export const rescuesOf = branchId => rescues().filter(r => r.branchId === branchId);
+export const openRescues = () => rescues().filter(r => r.state !== 'done');
+/** 送求救（★ 免登入都用得：佢哋就係入唔到先求救） */
+export function addRescue({ branchId = '', by = '', contact = '', kind = 'other', note = '', via = '求救頁' } = {}) {
   const at = nowStr();
-  if (!branchById(branchId)) return { ok: false, msg: '搵唔到呢個支部' };
-  if (!email.trim()) return { ok: false, msg: '要填專案擁有者嘅 Google 帳號' };
+  if (!String(by).trim()) return { ok: false, msg: '要填你係邊個（ADMIN 要搵得返你）' };
+  if (!String(contact).trim()) return { ok: false, msg: '要留低點搵到你（電話或 email）' };
+  const id = 'r-' + Date.now().toString(36);
   commit(d => {
-    d.downstream[branchId] = d.downstream[branchId] || {};
-    d.downstream[branchId].escOwner = { email: email.trim(), note: note.trim(), at, by: u?.name || '' };
+    d.rescues = d.rescues || [];
+    d.rescues.unshift({ id, at, branchId, by: String(by).trim(), contact: String(contact).trim(), kind, note: String(note).trim(), via, state: 'open' });
   }, { markDirty: true });
-  return { ok: true, at, email: email.trim() };
+  return { ok: true, id, at };
 }
-/** 本地逃生門紀錄（下游寫 ESC_LOG；旅側握手時讀返） */
-export const branchEscape = branchId => branchById(branchId)?.link?.esc || null;
-/** 上次旅長重新落決定之後嘅紀錄（用嚟講「呢次 ⚠ 係幾時清嘅」） */
-export const branchEscapeAck = branchId => branchById(branchId)?.link?.escAck || null;
-/** 旅側記錄 vs 下游真相：唔一致 ＝ 有人用過逃生門（或者下游被改過） */
-export function gateMismatch(branchId) {
-  const b = branchById(branchId);
-  if (!b) return { mismatch: false, known: false };
-  const truth = load().downstream?.[branchId]?.localLogin;
-  const known = typeof truth === 'boolean';
-  return { mismatch: known && truth !== gateAllowsLocalLogin(gateOfLink(b.link)), known, truth };
+/** ADMIN 處理求救：open-gate（開返支部系統登入）／reset-pw（重設密碼）／reply（答覆結案） */
+export function resolveRescue(id, { action = 'reply', reply = '', account = '', by = null } = {}) {
+  const u = by || currentUser();
+  const at = nowStr();
+  const r0 = rescueById(id);
+  if (!r0) return { ok: false, msg: '搵唔到呢張求救單' };
+  if (r0.state === 'done') return { ok: false, msg: '呢張求救單已經處理咗' };
+  const done = { at, by: u?.name || getSession()?.email || '', action };
+  if (action === 'open-gate') {
+    if (!r0.branchId) return { ok: false, msg: '求救單冇指明支部 —— 開唔到閘；先問清楚係邊個團' };
+    const g = setBranchGate(r0.branchId, 'open', { silent: true });
+    if (!g.ok) return g;                                   // 誠實失敗：唔會當成功
+    done.gate = 'open';
+  }
+  if (action === 'reset-pw') {
+    const acc = String(account).trim().toLowerCase();
+    const t = load().users.find(x => String(x.email || '').toLowerCase() === acc || String(x.ymis || '') === String(account).trim());
+    if (!t) return { ok: false, msg: `搵唔到帳號「${account}」—— 要 email 或 YMIS（成員戶要該團團長執行）` };
+    commit(d => { const x = d.users.find(y => y.id === t.id); x.mustChangePw = true; x.pwResetAt = at; x.pwResetBy = u?.name || ''; }, { markDirty: true });
+    done.account = t.email || t.ymis;
+    done.tempPwNote = t.role === 'member' ? '臨時密碼已發（首登強制改）；成員戶真模式要該團團長執行' : '臨時密碼已發（首登強制改）';
+  }
+  commit(d => {
+    const r = (d.rescues || []).find(x => x.id === id);
+    if (!r) return;
+    r.state = 'done'; r.done = done;
+    if (reply) r.reply = String(reply).trim();
+  }, { markDirty: true });
+  return { ok: true, at, by: done.by, action, tempPw: action === 'reset-pw' ? DEMO_TEMP_PW : '' };
 }
-/* ★ 用戶定案（2026-09-25）：逃生門用過之後**只提示**，唔設「接受／再閂返」拍板掣 ——
-   旅側記錄照舊當閂；旅長想改就照用上面嘅「閂支部系統登入／開返支部系統登入」兩個掣。
-   （冇 resolveEscape／冇一次性救援碼：唯一解鎖路徑＝Sheet 級手動解鎖。） */
-
+/** 示範用臨時密碼（真模式：隨機產生 ＋ 一次性連結，唔會顯示喺畫面） */
+export const DEMO_TEMP_PW = 'demo1234';
 /** ★ 支部版面：各支部自家設計，之後照抄入嚟（旅側唔另設一套） */
 export const branchLayout = id => (id === 'troop' ? null : (branchById(id)?.layout || null));
 export const myIdentity = () => session?.identity || null;
@@ -304,6 +320,8 @@ export function pendingList() {
   const d = load();
   return d.applications.filter(a => a.state === 'pending');
 }
+/** ★ 求救單計入待辦（ADMIN 一打開就見到） */
+export const rescuesPending = () => (load().rescues || []).filter(r => r.state !== 'done').length;
 export function counters() {
   const d = load();
   return {
@@ -315,6 +333,7 @@ export function counters() {
     usersPending: (d.users || []).filter(u => u.status === 'pending' && !u.hidden).length,
     sharesPending: pendingShares().length,
     sharesSentPending: sharesFromMe().filter(s => s.state === 'pending').length,
+    rescuesPending: rescuesPending(),
     systemAlerts: (d.branches || []).filter(b => b.link.state !== 'green').length + (d.backend?.broken?.length || 0)
   };
 }

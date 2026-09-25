@@ -49,13 +49,14 @@ export const MODULES = [
   {
     id: 'pending', label: '待辦與批核', icon: 'check', group: 'troop', tier: 'P0', order: 20,
     roles: ['chief', 'coach'], defaultOn: true, badge: s => s.pendingCount,
-    desc: '所有等你拍板嘅事集中一頁：開戶申請、跨團幫手、財務提問、公開項目上報、移交接收。',
+    desc: '所有等你拍板嘅事集中一頁：開戶申請、跨團幫手、財務提問、公開項目上報、移交接收、🆘 求救。',
     subs: [
       { id: 'pending-account', label: '帳號申請' },
       { id: 'pending-helper', label: '跨團幫手' },
       { id: 'pending-finance', label: '財務提交' },
       { id: 'pending-publish', label: '公開上報' },
-      { id: 'pending-transfer', label: '移交接收' }
+      { id: 'pending-transfer', label: '移交接收' },
+      { id: 'pending-rescue', label: '🆘 求救' }
     ]
   },
   {
@@ -339,62 +340,58 @@ export const gateOfLink = link => (GATE_STATES[link?.gate] ? link.gate : (link?.
 export const gateAllowsLocalLogin = g => g === 'open';
 
 /* ============================================================
-   ★ 防死鎖：單向逃生門（2026-09-25 用戶提問後定案）
+   ★ 求救制（2026-09-25 用戶定案；取代之前嘅「逃生門」設計）
    ------------------------------------------------------------
-   死鎖＝旅側控制面壞（旅 GAS 停權／Vercel 部署壞／sig 密鑰唔見／旅長冇人接手）
-        ＋ 該下游又閂咗自己登入 → 兩個方向都冇路入。
-   單向原則：
-     · 「閂」＝旅側獨有嘅決定（支部系統前後台都冇掣）。
-     · 「開」＝**永遠有出路**，而且出路唔經旅側 —— 所以旅側死都走得甩。
-     · 出路放喺 **Sheet／Apps Script 擁有者級**（就係用戶講嘅「入後端 SHEET 解鎖」），
-       唔係支部系統前台嘅掣（有掣就變返支部自己決定）。
-     · 冇提升任何權限：做得呢步嘅人（專案擁有者）本身已經睇得到全部資料；
-       解鎖只係回復原狀（`ALLOW_LOCAL_LOGIN` 未設定＝open）。
-     · 下游解鎖要寫自己嘅紀錄（`ESC_LOG`）＋ 回 `escOpened:true`；
-       旅側下次握手見到唔一致 → 標示「⚠ 本地解鎖用過」＋ 由旅長拍板（接受／再閂返）。
+   用戶原話：
+     「我唔想搞逃生門，佢關曬最多咪求救我入旅系統幫佢開番或者改密碼咪得，
+       與其如此不如加個制係救援制 SEND 比 ADMIN，咩情況求救都可以處理又唔洗搞咁複雜」
+   就係一件事：**入唔到／有任何問題 → 撳一個求救掣，送請求去 ADMIN**；
+   ADMIN 入旅系統處理（開返支部系統登入／重設密碼／覆覆佢）。
+   死規矩：
+     · 求救只係「請求」，**唔會自動開任何嘢**（唔會自動開閘、唔會自動改密碼）
+       —— 一定要 ADMIN 人手核實身份先做（唔然就變成任何人打個字就入得）。
+     · 求救入口**免登入**（佢哋就係入唔到先求救）：旅閘、支部系統 403 頁、
+       旅系統支部頁三處都擺同一個掣；支部系統側照抄一條連結就得
+       （`<旅 origin>/index.html?step=rescue&b=<支部 id>`）。
+     · 求救唔係控制面：支部系統前台冇「開閘／解鎖」嘅掣，只得「求救」。
    ============================================================ */
-export const GATE_ESCAPE = {
-  property: 'ALLOW_LOCAL_LOGIN',
-  unsetIs: 'open',
-  rescueFn: 'unlockLocalLogin()',
-  /** 死鎖情境（UI 同文件共用同一份，唔好兩邊各寫一套） */
-  deadlocks: [
-    { k: '旅側控制面壞', d: '旅 GAS 停權／超額、Vercel 部署壞、旅網域入唔到 —— 冇人簽得出 setGate' },
-    { k: 'sig 密鑰唔見／輪替失敗', d: '下游 _KEY 遺失、purpose 對唔上、時鐘偏差 → 簽唔出票（fail-closed 當閂）' },
-    { k: '旅側交接真空', d: '旅長離任／冇人接手 branch_link_edit；或者忘記密碼而 SUPER_KEY 又冇設' },
-    { k: '誤閂／要即時開返', d: '撳錯團、活動日要即場開名單、但旅側嗰刻連唔到網' },
-    { k: '團側轉手（Google 帳號）', d: '舊上游登記死咗，新團長手上只有自己嗰張 SHEET' }
+export const RESCUE = {
+  /** 免登入求救頁（支部系統側照抄呢條連結） */
+  entry: 'index.html?step=rescue',
+  link: (branchId = '') => `index.html?step=rescue${branchId ? '&b=' + branchId : ''}`,
+  /** 求救類型（咩情況都可以求救） */
+  kinds: [
+    { id: 'locked', label: '我入唔到（支部系統登入被閂）', hint: '旅閂咗「支部系統自己登入」呢條通道 —— 只可以經旅入口入' },
+    { id: 'password', label: '唔記得密碼／要改密碼', hint: 'ADMIN 核實身份之後可以重設（會發臨時密碼）' },
+    { id: 'link', label: '睇唔到資料（未登記／接駁有問題）', hint: '好似未接駁、或者讀唔到名冊／進度' },
+    { id: 'rights', label: '權限／身份唔啱', hint: '入到但係睇少咗嘢／做唔到嘢' },
+    { id: 'other', label: '其他（想講咩都得）', hint: '隨便寫，ADMIN 睇得到' }
   ],
-  /** 逃生門步驟（順序；UI 有「複製」掣） */
-  steps: [
-    '用「逃生門鑰匙」＝該下游係邊個 Google 帳號開嘅（專案擁有者），登入嗰個帳號',
-    '開下游 SHEET → 擴充功能 → Apps Script（或直接開 script.google.com 嗰個專案）',
-    '專案設定 → 指令碼屬性 → 刪 ALLOW_LOCAL_LOGIN（未設定＝開）；或者喺編輯器揀 unlockLocalLogin 按 Run（有紀錄）',
-    '即刻可以自己登入（唔需要旅側同意；旅側唔會收到任何請求）',
-    '下游寫一筆本地解鎖紀錄（時間／執行者 email／原因）＋ 回 escOpened:true',
-    '旅側下次握手見到唔一致 → 提示旅長：接受（記錄改為開）／再閂返（sig）'
+  /** ADMIN 喺旅系統做嘅事（全部留審計；全部由 ADMIN 拍板） */
+  actions: [
+    { id: 'open-gate', label: '開返支部系統登入', perm: 'branch_link_edit', desc: '把該團嘅登入通道開返（sig setGate gate=open）' },
+    { id: 'reset-pw', label: '重設密碼', perm: 'user_manage', desc: '發臨時密碼（首登強制改）；成員戶要該團團長執行' },
+    { id: 'reply', label: '答覆並結案', perm: 'audit_view', desc: '講清楚情況／叫佢搵邊個；求救單入紀錄' }
   ],
-  /** ★ 平台超管：唔靠下游登記／接駁嘅另一條路（用戶 2026-09-25：超管唔係靠登記 SHEET 登入） */
+  /** 來求救要填嘅嘢 */
+  fields: ['支部（揀或自己打）', '你係邊個（姓名／職位）', '點搵到你（電話／email）', '類型', '描述'],
+  note: '求救唔會自動做任何嘢：ADMIN 收到之後**人手核實身份**先開返／重設密碼。求救單一律留紀錄（邊個送、幾時、ADMIN 點處理）。',
+  /** 極少數情況（旅側同平台都連唔到）先用：入下游 Sheet 刪 ALLOW_LOCAL_LOGIN（未設定＝open）。
+      ★ 用戶定案：唔做逃生門 UI／唔登記鑰匙／唔加救援碼 —— 呢句只係文件上嘅最後手段。 */
+  fallback: '入下游 Sheet／Apps Script 刪 ALLOW_LOCAL_LOGIN（未設定＝open）—— 極少數情況先用，唔係日常路徑',
+  /** ★ 平台超管：唔靠下游登記／接駁（用戶 2026-09-25）——求救處理唔到嗰陣嘅下一站 */
   platform: {
     role: 'super',
     entry: 'index.html?step=super',
     label: '平台超管（隱藏）',
-    note: '超管驗身唔經「下游 SHEET 登記」——所以「該團未登記／紅燈／閂咗／接駁斷咗」都鎖佢唔住：佢入得返旅側（重設旅長密碼、補登記、再開閘）。但佢仍然要平台＋網絡，所以係<b>第二層</b>備援，唔可以取代 Sheet 級逃生門（最後一層：離線、唔靠任何服務）。'
-  },
-  /** ★ 用戶定案（2026-09-25） */
-  rules: {
-    noKeyTyping: '我知，冇匙都閂',
-    afterUse: '只提示（⚠），唔設「接受／再閂返」拍板掣 —— 旅側記錄照舊當閂；想改就照用上面嘅閂／開掣',
-    noRescueCode: true
-  },
-  /** 落閂前檢查（旅側 UI 出清單） */
-  before: [
-    '逃生門鑰匙登記咗未？＝該團 Sheet／Apps Script 專案擁有者嘅 Google 帳號（登記喺 DOWNSTREAM_<id>_ESC_OWNER ／ UI）；未登記就要打「我知，冇匙都閂」先過',
-    '該團團長知唔知呢條路？閂之前講清楚（唔係「冇掣」就等於「冇出路」）',
-    '旅側自己嘅備援：SUPER_KEY 設好未（超管可以重設旅長密碼，救返旅側控制面）',
-    '本地領袖戶**唔係**逃生門 —— 閂咗之後佢一樣 403，唯一出路係 Sheet 級解鎖'
-  ]
+    note: '超管驗身唔經「下游 SHEET 登記」——某團未登記／紅燈／閂咗／接駁斷都鎖佢唔住；ADMIN 連旅系統都入唔到嗰陣，佢入得返嚟重設 ADMIN 密碼／補登記。限制：要平台＋網絡。'
+  }
 };
+
+/** 求救類型 meta */
+export const rescueKindMeta = id => RESCUE.kinds.find(k => k.id === id) || RESCUE.kinds[RESCUE.kinds.length - 1];
+/** ADMIN 處理動作 meta */
+export const rescueMeta = id => RESCUE.actions.find(a => a.id === id) || { id: '', label: '' };
 
 /** ★ 分享種類：只做兩樣（2026-09-25 用戶定案）—— 通告 ＋ 活動（行事曆）
     其他種類（物資／進度／相簿／教材）留住個 kind 欄，但 UI 唔開，之後先加。 */

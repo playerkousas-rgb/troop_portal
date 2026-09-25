@@ -10,7 +10,7 @@
 import { esc, icon, toast, modal, confirmDlg, fmtStamp, normId } from './lib/util.js';
 import * as S from './lib/store.js';
 import { route, resolve, go, currentPath } from './lib/router.js';
-import { MODULES, GROUPS, moduleList, moduleAllowed, modulesForSession, moduleById, gateOfLink, gateMeta } from './lib/registry.js';
+import { MODULES, GROUPS, moduleList, moduleAllowed, modulesForSession, moduleById, gateOfLink, gateMeta, RESCUE, rescueKindMeta } from './lib/registry.js';
 import {
   login, loginAs, logout, changePassword, DEMO_LOGINS, DEMO_BRANCH_LOGINS, DEMO_PASSWORD,
   SUPER_EMAIL, branchEntryStatus, roleLabel
@@ -110,7 +110,7 @@ function moduleForPath(p) {
 }
 
 /* ---------------- 未登入：旅閘 → 身份 → 登入 ---------------- */
-const GATE_STEPS = ['unit', 'role', 'branch', 'login', 'super'];
+const GATE_STEPS = ['unit', 'role', 'branch', 'login', 'super', 'rescue'];
 function gateGo(step, extra = '') {
   location.href = location.pathname + '?step=' + step + (extra ? '&' + extra : '');
 }
@@ -158,6 +158,8 @@ function renderGate() {
         </div>
       </div>
       <div class="center mt-12 xs faint">示範模式唔需要後端：所有資料住喺你部機（localStorage），唔會送去任何地方。</div>
+      <div class="center mt-12"><button class="btn sm warn" id="rescue">🆘 入唔到／有問題？求救</button>
+        <div class="xs faint mt-8">求救唔使登入（入唔到先用得着）；ADMIN 收到之後人手核實身份先處理，唔會自動開任何嘢。</div></div>
       <div class="center mt-12"><button class="btn primary" id="pick2">${icon('arrowR', 15)} 入 ${esc(d.unit.name)}</button></div>`;
 
     gate.querySelector('#pick').onclick = () => gateGo('role');
@@ -170,6 +172,7 @@ function renderGate() {
       if (taps >= 5) { sessionStorage.setItem('troop.superHint', '1'); gateGo('super'); }
       else if (taps >= 3) toast(`（${5 - taps}…）`, '', '', null, 900);
     };
+    gate.querySelector('#rescue').onclick = () => gateGo('rescue');
     gate.querySelector('#diag').onclick = () => modal({
       title: '登記診斷（只列變數名，冇值）',
       body: `<div class="diag-list">ok: true<br>server: 'ecportal'<br>onVercel: false<br>vercelEnv: ''<br>region: ''<br>ids: ["${esc(d.unit.code)}"]<br>count: 1<br>recognizedNames: []<br>suspicious: []<br>withKey: []<br>trusted: ["${esc(d.unit.code)}"]<br>withName: ["${esc(d.unit.code)}"]</div>
@@ -353,6 +356,64 @@ function renderGate() {
     gate.querySelector('#lg-back').onclick = () => gateGo('unit');
     return;
   }
+
+  /* ---- 🆘 求救（免登入；任何人都送得，ADMIN 人手處理） ---- */
+  if (step === 'rescue') {
+    const preB = q.get('b') || '';
+    const b0 = d.branches.find(x => x.id === preB);
+    gate.innerHTML = `
+      <div class="gate-hero">
+        <div class="logo" style="width:48px;height:48px;font-size:22px">🆘</div>
+        <h1 style="font-size:22px">求救</h1>
+        <div class="faint sm">入唔到／有咩問題都可以喺度講 —— 唔使登入（你就係入唔到先用得着）</div>
+      </div>
+      <div class="card pad-l">
+        ${noticeBox('送出之後，旅部（ADMIN）會喺旅系統見到呢張求救單，<b>人手核實身份</b>之後開返支部系統登入／重設密碼／答覆你。<br><b>求救唔會自動開任何嘢</b> —— 唔會有人打幾個字就入得。')}
+        <label class="f"><span class="lb">邊個支部</span>
+          <select id="rs-b">
+            <option value="">（唔肯定／其他）</option>
+            ${d.branches.map(x => `<option value="${x.id}" ${x.id === preB ? 'selected' : ''}>${esc(x.name)}（${esc(x.code)}）</option>`).join('')}
+          </select></label>
+        <label class="f"><span class="lb">你係邊個（姓名／職位）★</span><input type="text" id="rs-by" placeholder="例：曾國強（樂行童軍團長）"></label>
+        <label class="f"><span class="lb">點搵到你（電話／email）★</span><input type="text" id="rs-contact" placeholder="9123 4567 / you@example.hk"></label>
+        <label class="f"><span class="lb">類型</span>
+          <select id="rs-kind">${RESCUE.kinds.map(k => `<option value="${k.id}">${esc(k.label)}</option>`).join('')}</select></label>
+        <label class="f"><span class="lb">講清楚發生咩事</span><textarea id="rs-note" rows="4" placeholder="例：今晚活動要點名，但支部系統登入唔到（話己經閂咗），想開返。"></textarea></label>
+        <div id="rs-err"></div>
+        <button class="btn primary block mt-8" id="rs-go">送出求救</button>
+        <div class="xs faint mt-8">★ 一定填。${RESCUE.note}</div>
+        <hr>
+        <div class="xs faint">其他人睇唔到呢張單（只有旅部 ADMIN）；送出之後你唔會即刻入得，等 ADMIN 覆你。</div>
+      </div>
+      <div class="center mt-12"><button class="btn" id="rs-back">${icon('arrowL', 14)} 返旅閘</button></div>`;
+    gate.querySelector('#rs-back').onclick = () => gateGo('unit');
+    gate.querySelector('#rs-go').onclick = () => {
+      const kindSel = gate.querySelector('#rs-kind');
+      const kindLabel = rescueKindMeta(kindSel.value).label;
+      const res = S.addRescue({
+        branchId: gate.querySelector('#rs-b').value,
+        by: gate.querySelector('#rs-by').value,
+        contact: gate.querySelector('#rs-contact').value,
+        kind: kindSel.value,
+        note: gate.querySelector('#rs-note').value
+      });
+      if (!res.ok) { gate.querySelector('#rs-err').innerHTML = `<div class="err mb-8">${esc(res.msg)}</div>`; return; }
+      gate.innerHTML = `
+        <div class="gate-hero">
+          <div class="logo" style="width:48px;height:48px;font-size:22px">✅</div>
+          <h1 style="font-size:22px">求救單已送出</h1>
+          <div class="faint sm">編號 <span class="mono">${esc(res.id)}</span> · ${esc(res.at)}</div>
+        </div>
+        <div class="card pad-l">
+          ${noticeBox(`旅部（ADMIN）而家見到你張單：<b>${esc(kindLabel)}</b>`)}
+          <div class="sm">跟住會發生咩事：<br>① ADMIN 核實你身份（可能打電話搵你——所以一定要留低聯絡）<br>② 佢喺旅系統撳「開返支部系統登入」或「重設密碼」<br>③ 佢覆你／打電話通知你，你再試登入</div>
+          <div class="xs faint mt-8">求救單已經入紀錄（邊個送、幾時、ADMIN 點處理）。你唔會即刻入得 —— 呢個係「請求」，唔係自動開閘。</div>
+        </div>
+        <div class="center mt-12"><button class="btn primary" id="rs-done">返旅閘</button></div>`;
+      gate.querySelector('#rs-done').onclick = () => gateGo('unit');
+    };
+    return;
+  }
 }
 
 /* ---- 支部人員登入（已揀團） ---- */
@@ -369,8 +430,11 @@ function renderBranchLogin(gate, q) {
       <h2 class="mt-0">${esc(b.name)} 入唔到</h2>
       <div class="err">${esc(st.msg)}</div>
       ${noticeBox('旅長做一步就得：支部 → 揀該團 →「接駁與登記」填 URL ＋ KEY ＋ sig 用途 → 測試連線（綠燈）。')}
-      <div class="btn-row mt-12"><button class="btn" id="back">揀第二個團</button><a class="btn primary" href="index.html?step=login&path=staff">我係旅長／教練員</a></div>
+      <div class="btn-row mt-12"><button class="btn" id="back">揀第二個團</button><a class="btn primary" href="index.html?step=login&path=staff">我係旅長／教練員</a>
+        <button class="btn warn" id="rescue">🆘 求救</button></div>
+      <div class="xs faint mt-8">求救免登入：送出之後旅部（ADMIN）會見到，佢查完／開返之後就會覆你。</div>
     </div></div>`;
+    gate.querySelector('#rescue').onclick = () => gateGo('rescue', 'b=' + encodeURIComponent(bid));
     gate.querySelector('#back').onclick = () => gateGo('branch');
     return;
   }
@@ -400,9 +464,12 @@ function renderBranchLogin(gate, q) {
         <button class="unit-card" id="switch"><span class="emblem">${icon('refresh', 20)}</span><span class="grow"><span class="bold">揀第二個團</span><br><span class="xs faint">${d.branches.length} 個支部</span></span></button>
         <a class="unit-card" href="public.html" target="_blank" rel="noopener"><span class="emblem">${icon('globe', 20)}</span><span class="grow"><span class="bold">公開頁</span><br><span class="xs faint">免登入</span></span></a>
       </div>
+      <div class="center mt-12"><button class="btn sm warn" id="rescue">🆘 入唔到／唔記得密碼？求救</button>
+        <div class="xs faint mt-8">免登入送得：ADMIN 核實身份之後會開返／重設密碼，再通知你。</div></div>
     </div>`;
   bindLoginForm(gate, logins, { keepBranch: true });
   gate.querySelector('#switch').onclick = () => gateGo('branch');
+  gate.querySelector('#rescue').onclick = () => gateGo('rescue', 'b=' + encodeURIComponent(bid));
 }
 
 /* ---- 登入表單（旅層／家長／支部通用） ---- */

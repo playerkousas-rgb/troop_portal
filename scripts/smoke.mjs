@@ -416,105 +416,93 @@ await test('★ 支部系統登入通道：UI 只有旅長見掣、教練員冇'
   assert(v2.textContent.includes('唔可以改'), '冇講明冇權');
 });
 
-await test('★ 防死鎖：逃生門（單向）—— 下游自己開得返，旅側只提示（唔設拍板掣）', async () => {
-  /* 定義：同文件共用 GATE_ESCAPE 一份（唔可以兩邊各寫一套） */
-  assert(R.GATE_ESCAPE.property === 'ALLOW_LOCAL_LOGIN', '逃生門屬性定義唔啱');
-  assert(R.GATE_ESCAPE.unsetIs === 'open', '冇講明「未設定＝開」');
-  assert(R.GATE_ESCAPE.steps.length >= 4 && R.GATE_ESCAPE.deadlocks.length >= 3, '逃生門步驟／死鎖情境唔夠');
-  assert(R.GATE_ESCAPE.steps.join(' ').includes('未設定＝開'), '逃生門步驟冇講「未設定＝開」');
-  assert(R.GATE_ESCAPE.before.join(' ').includes('本地領袖戶'), '落閂前檢查冇講「本地領袖戶唔係逃生門」');
-  assert(R.GATE_ESCAPE.before.join(' ').includes('冇匙都閂'), '落閂前檢查冇講「未登記鑰匙要打確認句」');
-  assert(R.GATE_ESCAPE.rules.noKeyTyping === '我知，冇匙都閂', '冇匙確認句定義唔啱');
-  assert(R.GATE_ESCAPE.rules.noRescueCode === true, '用戶定案：唔加一次性救援碼');
-  /* ★ 超管：驗身唔經「下游登記」——所以登記／接駁／閂咗都鎖佢唔住 */
-  assert(R.GATE_ESCAPE.platform.entry.includes('step=super'), '超管入口定義唔啱');
-  assert(R.GATE_ESCAPE.platform.note.includes('唔經「下游 SHEET 登記」'), '冇講明超管唔靠登記 SHEET 登入');
-  const supRow = await A.login(A.SUPER_EMAIL, A.DEMO_PASSWORD);
-  assert(supRow.ok && S.getSession().role === 'super', '超管登入失敗（唔應該受任何支部狀態影響）');
-  assert(S.canSeeBranch(S.branchById('gs0082')), '超管應該睇得到未登記下游（gs0082）');
-  assert(S.canSeeBranch(S.branchById('rs0082')), '超管應該睇得到已閂嘅下游（rs0082）');
+await test('★ 求救制：入唔到撳求救（免登入）→ ADMIN 喺旅側處理（唔會自動開任何嘢）', async () => {
+  /* 定義：同文件共用 RESCUE 一份（唔可以兩邊各寫一套） */
+  assert(R.RESCUE.kinds.length >= 4, '求救類型唔夠（咩情況都要求救得到）');
+  assert(R.RESCUE.actions.map(a => a.id).join(',') === 'open-gate,reset-pw,reply', 'ADMIN 處理動作定義唔啱');
+  assert(R.RESCUE.note.includes('唔會自動做任何嘢'), '冇講明求救唔會自動做任何嘢');
+  assert(R.RESCUE.platform.note.includes('唔經「下游 SHEET 登記」'), '冇講明超管唔靠登記 SHEET 登入');
+  assert(R.RESCUE.fallback.includes('ALLOW_LOCAL_LOGIN'), '冇記低極少數情況嘅最後手段');
 
-  /* 鑰匙持有人 ＝ 下游 Sheet／Apps Script 專案擁有者 */
+  /* ★ 免登入都用得：登出之後送求救（佢哋就係入唔到先求救） */
+  A.logout();
+  assert(!S.getSession(), '登出失敗');
+  const bad = S.addRescue({ branchId: 'gs0082', by: '', contact: 'x@y.hk', kind: 'link' });
+  assert(bad.ok === false && bad.msg.includes('你係邊個'), '唔填「你係邊個」竟然收貨');
+  const bad2 = S.addRescue({ branchId: 'gs0082', by: '陳小明', contact: '', kind: 'link' });
+  assert(bad2.ok === false && bad2.msg.includes('點搵到你'), '唔留聯絡竟然收貨');
+  const r = S.addRescue({ branchId: 'gs0082', by: '陳小明（家長）', contact: 'lam@example.hk', kind: 'link', note: '睇唔到個仔嘅活動' });
+  assert(r.ok && r.id, '免登入送出求救失敗');
+  const mine = S.rescueById(r.id);
+  assert(mine.state === 'open' && mine.branchId === 'gs0082', '求救單冇寫入');
+  assert(S.rescuesPending() >= 1, '求救冇計入待辦');
+
+  /* 求救只係請求：唔會自己開閘 */
+  assert(S.branchGate('gs0082') === 'open' && S.branchById('gs0082').link.state === 'red', '求救唔應該改任何閘／接駁狀態');
+
+  /* ADMIN（旅長）見到：待辦與批核 → 🆘 求救 */
   A.loginAs('u-chief');
-  const w1 = S.setEscOwner('sc0082', { email: 'sc82.owner@gmail.com', note: '李美儀（團長）· 專案擁有者' });
-  assert(w1.ok && S.escOwner('sc0082').email === 'sc82.owner@gmail.com', '逃生門鑰匙登記唔到');
-  assert(S.setEscOwner('sc0082', { email: '  ' }).ok === false, '空 email 竟然收貨');
-
-  /* 旅側記錄 vs 下游真相：樂行用過本地解鎖 → 偵測到唔一致 */
-  assert(S.branchGate('rs0082') === 'sig-only' && S.gateMismatch('rs0082').mismatch === true, '偵測唔到本地解鎖');
-  assert((S.branchEscape('rs0082').by || '').includes('曾國強'), '本地解鎖紀錄唔啱');
-  /* ★ 只提示：冇「接受／再閂返」拍板函式（用戶定案） */
-  assert(typeof S.resolveEscape === 'undefined', '唔應該再有拍板函式（只提示）');
-
-  /* UI：旅長見到 ⚠ ＋ 逃生門卡 ＋ 冇拍板掣；教練員睇到步驟但冇掣 */
   main.boot();
-  fireHash(w, '#/branch/rs0082?tab=link');
+  fireHash(w, '#/pending?kind=rescue');
   const v = document.getElementById('view');
-  assert(v.textContent.includes('防死鎖') && v.textContent.includes('偵測到本地解鎖'), '逃生門卡／⚠ 冇出現');
-  assert(v.textContent.includes('只提示'), '⚠ 冇講明「只提示、唔會自動改」');
-  assert(!v.querySelector('[data-esc]'), '唔應該再有「接受／再閂返」拍板掣');
-  assert(v.querySelector('[data-copy-esc]'), '冇「複製逃生門步驟」掣');
-  assert(v.textContent.includes('唔係支部系統前台'), '冇講明出路唔喺支部系統前台');
-  assert(v.textContent.includes('平台超管') && v.textContent.includes('閂唔住'), '冇講明超管鎖唔住');
-  assert(v.textContent.includes('超管唔受呢個掣影響'), '通道卡冇講超管唔受閘影響');
-  assert(v.querySelector('[data-esc-owner="rs0082"]'), '冇「改逃生門鑰匙」掣');
-  A.loginAs('u-lee');                     // 教練員
-  main.boot();
-  fireHash(w, '#/branch/rs0082?tab=link');
-  const v2 = document.getElementById('view');
-  assert(v2.textContent.includes('ALLOW_LOCAL_LOGIN'), '教練員睇唔到逃生門步驟');
-  assert(!v2.querySelector('[data-esc-owner]'), '教練員唔應該有改匙掣');
-  assert(!v2.querySelector('[data-gate]'), '教練員唔應該有閂／開掣');
+  assert(v.textContent.includes('求救'), '待辦冇「求救」分頁');
+  assert(v.textContent.includes('陳小明'), '求救單冇出現喺待辦');
+  assert(v.querySelector('[data-act="open-gate"]') && v.querySelector('[data-act="reset-pw"]') && v.querySelector('[data-act="reply"]'), '求救單冇三個處理掣');
+  assert(v.textContent.includes('人手核實'), '冇講明要人手核實身份');
 
-  /* ★ 冇登記鑰匙 ＝ 冇離線退路 → 閂之前要打「我知，冇匙都閂」 */
-  A.loginAs('u-chief');
-  assert(S.branchGate('sc0082') === 'open', '示範起始狀態唔啱（童軍團＝兩條通道都開）');
-  S.commit(d => { d.downstream.sc0082.escOwner = null; }, { markDirty: true });
-  assert(!S.escOwner('sc0082'), '示範資料清理失敗');
+  /* 支部頁都見到同一張單 ＋ 求救連結可複製 */
+  fireHash(w, '#/branch/gs0082?tab=link');
+  const vb = document.getElementById('view');
+  assert(vb.textContent.includes('🆘 求救（呢個支部送嚟嘅）'), '支部頁冇求救卡');
+  assert(vb.textContent.includes('陳小明'), '支部頁冇列出求救單');
+  assert(vb.querySelector('[data-copy-rescue]'), '冇「複製求救連結」掣');
+
+  /* 處理 1：未登記下游 → 開閘誠實失敗（唔會扮成功） */
+  const g = S.resolveRescue(r.id, { action: 'open-gate' });
+  assert(g.ok === false && g.msg.includes('未登記下游'), '未登記下游竟然開到閘');
+  assert(S.rescueById(r.id).state === 'open', '失敗之後求救單唔應該當處理咗');
+
+  /* 處理 2：重設密碼（錯帳號 → 誠實失敗；啱帳號 → 首登強制改） */
+  const pw0 = S.resolveRescue(r.id, { action: 'reset-pw', account: 'nobody@example.hk' });
+  assert(pw0.ok === false && pw0.msg.includes('搵唔到帳號'), '錯帳號竟然重設到');
+  const pw1 = S.resolveRescue(r.id, { action: 'reset-pw', account: 'cs-deputy@demo.troop' });
+  assert(pw1.ok && pw1.action === 'reset-pw', '重設密碼失敗');
+  assert(S.load().users.find(x => x.email === 'cs-deputy@demo.troop').mustChangePw === true, '重設之後應該強制改密碼');
+  assert(S.rescueById(r.id).state === 'done', '處理完求救單應該結案');
+
+  /* 求救制：ADMIN 喺支部頁「開返支部系統登入」＝真係開到（已登記嘅團） */
+  S.setBranchGate('sc0082', 'sig-only');
+  const r2 = S.addRescue({ branchId: 'sc0082', by: '黃子晴（副隊長）', contact: '6345 8899', kind: 'locked', note: '入唔到，想開返' });
+  assert(r2.ok, '送出求救失敗');
+  const g2 = S.resolveRescue(r2.id, { action: 'open-gate' });
+  assert(g2.ok && S.branchGate('sc0082') === 'open', '求救「開返」應該真係開返個閘');
+  assert(S.rescueById(r2.id).state === 'done' && S.rescueById(r2.id).done.action === 'open-gate', '開返之後求救單冇結案紀錄');
+
+  /* 答覆結案：留低 ADMIN 回覆 */
+  const r3 = S.addRescue({ branchId: 'cs0082', by: '李美儀（團長）', contact: 'coach@demo.troop', kind: 'other', note: '問物資' });
+  const rep = S.resolveRescue(r3.id, { action: 'reply', reply: '旅部物資要經物資頁申請。' });
+  assert(rep.ok && S.rescueById(r3.id).reply.includes('物資頁'), '答覆冇留住');
+  assert(S.resolveRescue(r3.id, { action: 'reply' }).ok === false, '已結案嘅求救單應該唔可以再處理');
+
+  /* 權限：教練員可以答覆（audit_view）但唔可以開閘／重設密碼 */
+  A.loginAs('u-lee');
   main.boot();
   fireHash(w, '#/branch/sc0082?tab=link');
   const v3 = document.getElementById('view');
-  const lockBtn = v3.querySelector('[data-gate="sc0082"][data-g="sig-only"]');
-  assert(lockBtn, '冇「閂支部系統登入」掣');
-  lockBtn.click();
-  await new Promise(r => setTimeout(r, 30));
-  const dlg = document.querySelector('.mask');
-  assert(dlg && dlg.querySelector('#cf-typing'), '冇逃生門鑰匙竟然唔使打字確認');
-  assert(dlg.textContent.includes('未登記「逃生門鑰匙」'), '確認框冇講明冇匙風險');
-  const yes = dlg.querySelector('[data-yes]');
-  assert(yes.disabled === true, '未打確認句就應該撳唔到');
-  const typing = dlg.querySelector('#cf-typing');
-  typing.value = '我知，冇匙都閂';
-  typing.dispatchEvent(new w.Event('input'));
-  assert(yes.disabled === false, '打啱確認句之後應該撳得到');
-  yes.click();
-  await new Promise(r => setTimeout(r, 30));
-  assert(S.branchGate('sc0082') === 'sig-only', '確認之後應該真係閂到');
-  /* 還原示範狀態：童軍團 = 兩條通道都開 ＋ 鑰匙登記返 */
+  assert(!R.can('coach', 'branch_link_edit') && !R.can('coach', 'user_manage'), '教練員權限定義唔啱');
+  assert(v3.querySelector('[data-copy-rescue]'), '教練員都應該睇到求救卡');
+  assert(v3.textContent.includes('🆘'), '冇求救入口');
+  A.loginAs('u-chief');
+  /* 還原示範狀態 */
   S.commit(d => {
+    d.rescues = d.rescues.filter(x => x.id !== r.id && x.id !== r2.id && x.id !== r3.id);
     const b = d.branches.find(x => x.id === 'sc0082');
     b.link.gate = 'open'; b.link.localLogin = true; b.link.state = 'yellow';
     b.link.gateBy = '陳大文'; b.link.gateAt = '2026-09-22 10:15';
-    d.downstream.sc0082.localLogin = true;
-    d.downstream.sc0082.escOwner = { email: 'sc82.owner@gmail.com', note: '李美儀（童軍團長）· 專案擁有者', at: '2026-09-22 10:15', by: '陳大文' };
+    const u = d.users.find(x => x.email === 'cs-deputy@demo.troop');
+    if (u) { u.mustChangePw = false; delete u.pwResetAt; delete u.pwResetBy; }
   }, { markDirty: true });
-  assert(S.branchGate('sc0082') === 'open' && S.escOwner('sc0082'), '還原示範狀態失敗');
-
-  /* ⚠ 之後：旅長想同步就照用上面兩個掣（冇自動改；冇自動再閂） */
-  assert(S.gateMismatch('rs0082').mismatch === true, '⚠ 應該一路留住（唔會自己消失）');
-  assert(S.setBranchGate('rs0082', 'open').ok === true, '開返（記錄改為開）失敗');
-  assert(S.gateMismatch('rs0082').mismatch === false, '開返之後應該一致');
-  assert(S.branchEscape('rs0082') === null && S.branchEscapeAck('rs0082').mode === 'accept', '開返冇清 ⚠／冇留紀錄');
-  /* 收尾：還原「⚠ 本地解鎖待處理」示範狀態 */
-  S.commit(d => {
-    const b = d.branches.find(x => x.id === 'rs0082');
-    b.link.gate = 'sig-only'; b.link.localLogin = false; b.link.state = 'green';
-    b.link.gateBy = '陳大文'; b.link.gateAt = '2026-09-23 22:10';
-    b.link.esc = { at: '2026-09-25 02:10', by: '曾國強（團長）', method: 'Apps Script 手動解鎖（unlockLocalLogin）', why: '旅側 GAS 停權維修中，活動日要開名單' };
-    b.link.escAck = null;
-    d.downstream.rs0082.localLogin = true; d.downstream.rs0082.escOpened = true;
-  }, { markDirty: true });
-  assert(S.gateMismatch('rs0082').mismatch === true, '還原示範狀態失敗');
+  assert(S.rescuesPending() === 3, '還原求救示範狀態失敗（應該剩 3 張待處理）');
 });
 
 await test('★ 支部版面：旅側唔另設，各支部自家版面之後照抄（有接入位）', async () => {
