@@ -14,7 +14,8 @@
     "smoke": "node scripts/smoke.mjs",
     "check": "node scripts/lint.mjs && node scripts/gas-test.mjs && node scripts/api-test.mjs && node scripts/smoke.mjs",
     "gas-test": "node scripts/gas-test.mjs",
-    "api-test": "node scripts/api-test.mjs"
+    "api-test": "node scripts/api-test.mjs",
+    "units": "node scripts/units.mjs"
   },
   "devDependencies": {
     "jsdom": "^30.1.1"

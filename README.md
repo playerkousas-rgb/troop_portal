@@ -19,7 +19,7 @@
 
 ```bash
 npm run dev        # → http://localhost:8080/
-npm run check      # lint + 旅 GAS 本機測試（34）+ /api 測試（19）+ jsdom smoke（76）
+npm run check      # lint + 旅 GAS 本機測試（38）+ /api 測試（21）+ jsdom smoke（80）
 ```
 
 > 後端兩層：**旅 SHEET**（`apps-script/Code.gs`）＋**平台**（`api/proxy`／`auth`／`super`／`units`／`downstreams`／`troop`／`registry`／`member-entry`／`share`）。

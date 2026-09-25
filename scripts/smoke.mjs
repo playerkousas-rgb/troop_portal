@@ -1368,6 +1368,124 @@ await test('★ merge3：唔同欄各自保留；同一格衝突唔自動揀（�
   assert(rows.asks.some(a => a.id === 'n-1'), '同一行同一欄都改過 → 要問');
 });
 
+await test('★ 備份：Drive 留 13 份、三時機提醒、匯入前警告（冇新鮮備份唔好批量操作）', async () => {
+  const sys = await import('../assets/js/views/system.js');
+  eq(sys.BACKUP_KEEP, 13, 'BUILD 寫留 13 份');
+  const st = sys.localBackupState(S.load());
+  eq(st.keep, 13);
+  assert(st.count >= 1, '示範要有備份紀錄');
+  assert(typeof st.remind === 'string' && st.remind.length > 5, '要有人話提醒');
+  /* 過期（>7 日）要有 stale；新嘅唔應該 stale */
+  const old = sys.localBackupState({ backups: [{ at: '2020-01-01 00:00' }] });
+  assert(old.stale === true && /日冇備份/.test(old.remind), '7 日冇備份要提醒：' + old.remind);
+  const fresh = sys.localBackupState({ backups: [{ at: new Date().toISOString().slice(0, 16).replace('T', ' ') }] });
+  assert(fresh.stale === false, '啱做過備份唔應該話過期');
+  assert(sys.localBackupState({ backups: [] }).missing === true, '冇紀錄＝missing');
+  /* 頁面要有 13 份／三時機／即刻做備份 */
+  A.loginAs('u-chief');
+  main.boot();
+  fireHash(w, '#/system?tab=data');
+  const t = text();
+  assert(t.includes('Drive 留 13 份'), '資料頁冇講 13 份：' + t.slice(0, 120));
+  assert(t.includes('三時機提醒'), '資料頁冇三時機提醒');
+  assert(document.querySelector('[data-backup]'), '冇「即刻做 Drive 備份」掣');
+  document.querySelector('[data-backup]').click();
+  await new Promise(r => setTimeout(r, 30));
+  assert(S.load().backups.length >= 4, '示範模式撳備份要入本機紀錄');
+  assert(S.load().audit.some(a => String(a.action).includes('備份去 Drive')), '備份要入審計');
+  /* 匯入對話框要有批量操作前提醒 */
+  fireHash(w, '#/system?tab=data');
+  document.querySelector('[data-import]').click();
+  const dlgText = document.querySelector('.mask')?.textContent || '';
+  assert(/批量操作前提醒|已經有新鮮備份/.test(dlgText), '匯入前要有備份提醒：' + dlgText.slice(0, 80));
+});
+
+await test('★ PDPO：離隊 12 個月（演練 → 真做）、數據清單、同意書文案', async () => {
+  A.loginAs('u-chief');
+  main.boot();
+  fireHash(w, '#/system?tab=privacy');
+  const t = text();
+  assert(t.includes('數據清單'), '要有數據清單：' + t.slice(0, 120));
+  assert(t.includes('12 個月'), '要講 12 個月 purge');
+  assert(t.includes('家長同意'), '要講家長同意');
+  assert(document.querySelector('[data-consent-text]'), '要有同意書文案掣');
+  /* GAS 側嘅數據清單要同 UI 講同一套（兩邊一齊講 PDPO 先算數） */
+  const gas = readFileSync(join(ROOT, 'apps-script/Code.gs'), 'utf8');
+  assert(/function dataInventory/.test(gas) && /function purgeLeftMembers/.test(gas), 'GAS 要有數據清單／離隊 purge');
+  assert(/dryRun !== false/.test(gas), '離隊 purge 預設要係演練（唔好一撳就清）');
+  assert(/consent: !!\(o\.consent\)/.test(gas), '開戶申請要記家長同意欄位');
+});
+
+await test('★ 匿名可寫面：公開頁免登入寫入只經 /api/proxy 白名單（六支），示範零 fetch', async () => {
+  const PUB = await import('../assets/js/lib/public.js');
+  const proxy = readFileSync(join(ROOT, 'api/proxy.js'), 'utf8');
+  const gasSrc = readFileSync(join(ROOT, 'apps-script/Code.gs'), 'utf8');
+  /* 三邊白名單要一模一樣：前端 lib ↔ proxy ↔ GAS */
+  const m = proxy.match(/export const ANON_GAS = \[([^\]]+)\]/);
+  assert(m, 'proxy 要有 ANON_GAS 白名單');
+  const proxyList = m[1].split(',').map(x => x.trim().replace(/^'|'$/g, '')).filter(Boolean);
+  eq(PUB.ANON_ACTIONS.length, 6, '免登入可寫面應該係六支');
+  PUB.ANON_ACTIONS.forEach(a => assert(proxyList.includes(a), `proxy 白名單要包 ${a}`));
+  const gasList = (gasSrc.match(/ANON_WRITE_ACTIONS\s*=\s*\[([^\]]+)\]/) || [, ''])[1];
+  PUB.ANON_ACTIONS.forEach(a => assert(gasList.includes(a), `GAS 匿名可寫面要包 ${a}`));
+  /* 內部欄位喺匿名路徑要擋（proxy 側） */
+  assert(/export const ANON_FORBID = \[/.test(proxy) && /state/.test(proxy.match(/ANON_FORBID = \[([^\]]+)\]/)[1]), 'ANON_FORBID 要擋 state');
+  assert(/anon_forbidden/.test(proxy), '擋到要回 anon_forbidden 錯誤碼');
+  /* 示範模式：一個請求都唔會發 */
+  S.resetDemo();
+  let fetched = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => { fetched++; return { ok: true, status: 200, json: async () => ({ success: true }) }; };
+  const mock = await PUB.submitAnon('accountApply', { name: '示範', ymis: 'YMIS-9', consent: true });
+  eq(mock.ok, false, '示範模式唔可以當成功');
+  eq(mock.code, 'mock', '示範要回 mock 碼');
+  eq(fetched, 0, '示範模式零 fetch（鐵律）');
+  const notAllowed = await PUB.submitAnon('deleteUser', {});
+  eq(notAllowed.code, 'not_allowed', '白名單以外要即刻擋（前端側）');
+  assert(PUB.receiptText(mock, { what: '報名' }).text.includes('示範'), '示範提示要老實講');
+  globalThis.fetch = realFetch;
+  /* 四個公開頁都要真接上（唔止 UI 假成功） */
+  [['public.html', 'saveRescue'], ['notice.html', 'noticeSignup'], ['borrow.html', 'borrowApply'], ['join.html', 'accountApply']]
+    .forEach(([f, action]) => {
+      const html = readFileSync(join(ROOT, f), 'utf8');
+      assert(html.includes("from './assets/js/lib/public.js'"), `${f} 要 import public.js`);
+      assert(html.includes(`submitAnon('${action}'`), `${f} 要真送 ${action}`);
+    });
+  /* borrow 要帶 GAS 認得嘅 ref（物資編號），唔係 itemId */
+  const borrow = readFileSync(join(ROOT, 'borrow.html'), 'utf8');
+  assert(/submitAnon\('borrowApply',\s*\{[\s\S]*?ref: it\.id/.test(borrow), 'borrow 要帶 ref＝物資編號');
+  /* join 純邀請制：冇邀請都要畀人表達想開戶，但一定要 YMIS */
+  const joinHtml = readFileSync(join(ROOT, 'join.html'), 'utf8');
+  assert(/純邀請制/.test(joinHtml), 'join 要講純邀請制');
+  assert(/要填 YMIS/.test(joinHtml), '開戶申請要強制 YMIS');
+  assert(/PDPO/.test(joinHtml), '要 PDPO 同意打勾');
+});
+
+await test('★ 平台開旅：scripts/units.mjs（units.json ＋ env 清單），檔永遠唔含 key', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const run = args => execFileSync('node', [join(ROOT, 'scripts/units.mjs'), ...args], { cwd: ROOT, encoding: 'utf8' });
+  const list = run(['list']);
+  assert(/data\/units\.json/.test(list) && /第八十二旅/.test(list), 'list 要印旅：' + list.slice(0, 80));
+  assert(/Vercel env/.test(list), 'list 要提醒 BACKEND／APIKEY 住 Vercel env');
+  const env = run(['env', '--id', '82']);
+  assert(/TROOP_82_BACKEND=/.test(env) && /TROOP_82_APIKEY=/.test(env), 'env 要印兩個變數名');
+  assert(/SESSION_SECRET/.test(env), 'env 要提平台共用變數');
+  /* 檔本身：唔可以有任何 key／URL（連格式檢查都要過） */
+  const raw = readFileSync(join(ROOT, 'data/units.json'), 'utf8');
+  const units = JSON.parse(raw).units;
+  eq(units.length, 1, '示範資料庫得一個旅');
+  assert(!/troop_|script\.google\.com|APIKEY=|\/exec/.test(raw), 'units.json 永遠唔可以含 key／後端 URL');
+  assert(units.every(u => u.backendEnv === undefined && u.keyEnv === undefined), '單位 entry 只放公開資料');
+  const check = run(['check']);
+  assert(/格式同私隱檢查都過/.test(check), 'check 要過：' + check);
+  /* 平台 UI 要有工具卡（同 docs/教材 08 checklist 對得上） */
+  const pf = readFileSync(join(ROOT, 'assets/js/views/platform.js'), 'utf8');
+  assert(/scripts\/units\.mjs/.test(pf) && /npm run units/.test(pf), '平台頁要教點跑 units.mjs');
+  assert(/api\/units\?diag=1/.test(pf), '平台頁要可以睇真 · /api/units?diag=1');
+  const doc = readFileSync(join(ROOT, 'docs/教材/08-開旅-checklist.md'), 'utf8');
+  assert(/units\.mjs/.test(doc), '開旅 checklist 要提 units.mjs');
+});
+
 /* ---------- 互動掃描：撳晒所有掣，唔可以有例外 ---------- */
 const asyncErrors = [];
 process.on('unhandledRejection', e => asyncErrors.push(String(e && e.message ? e.message : e)));
@@ -1403,7 +1521,7 @@ await test('互動掃描：每個模組／分頁所有掣撳一次（連 async h
   }
   const uniq = [...new Set([...errs, ...asyncErrors])];
   assert(!uniq.length, `撳咗 ${clicks} 個掣，有 ${uniq.length} 個問題：\n   - ${uniq.slice(0, 8).join('\n   - ')}`);
-  results[results.length - 1] = ['ok', `互動掃描：撳咗 ${clicks} 個掣，冇例外`];
+  if (results[results.length - 1]?.[0] === 'ok') results[results.length - 1] = ['ok', `互動掃描：撳咗 ${clicks} 個掣，冇例外`];
   S.resetDemo();                                                       // 掃描改過嘅示範資料還原
 });
 

@@ -15,12 +15,21 @@
 - [ ] 部署 → 網頁應用程式 → 執行身分「我」、存取權「任何人」→ 攞 `/exec`。
 - [ ] 選單「🔑 顯示 BACKEND／APIKEY」→ 交俾 ADMIN（**唔好入 git**）。
 
-## C. Vercel env（ADMIN）
+## C. 平台登記 ＋ Vercel env（ADMIN）
 
-- [ ] `TROOP_<旅ID>_BACKEND`（`/exec`）、`TROOP_<旅ID>_APIKEY`。
+- [ ] 用工具 `scripts/units.mjs`（`npm run units`）登記旅，唔好手改 `data/units.json`（減少打錯旅 ID）：
+      `npm run units -- add --id 82 --name "第八十二旅" --district 香港 --branches 5`
+- [ ] 驗格式同私隱：`npm run units -- check`（會擋重複 ID；亦**擋住任何 key／URL 入咗檔**）。
+- [ ] 印 env 清單：`npm run units -- env --id 82` → 照住貼：
+      `TROOP_82_BACKEND`（`/exec`）、`TROOP_82_APIKEY`。
 - [ ] `SESSION_SECRET`（`openssl rand -hex 32`）、`SUPER_KEY`、`SHARE_SECRET`。
 - [ ] （可選）`ADMIN_ISSUE_ENDPOINT`（唔設＝用預設 Scout Admin 收件匣）。
 - [ ] Redeploy（env 要重新 build 先生效）。
+- [ ] 驗一驗平台側認到：開旅系統 →（超管）平台 → 旅登記 → 「睇真 · `/api/units?diag=1`」
+      → 見到 `TROOP_82_BACKEND`／`TROOP_82_APIKEY` 兩個變數名（**只列名，永遠冇值**）。
+
+> 💡 `data/units.json` 只放**公開資料**（旅 ID／名／地區／支部數）。後端 URL 同 APIKEY 永遠住 Vercel env，
+> 入唔到 git。工具嘅 `check` 就係守呢條線。
 
 ## D. 網站首次登入
 

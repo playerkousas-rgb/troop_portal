@@ -85,7 +85,23 @@ function makeSandbox({ fetchImpl } = {}) {
     Session: { getEffectiveUser: () => ({ getEmail: () => 'admin@example.hk' }) },
     MailApp: { sendEmail() {} },
     Logger: { log() {} },
-    DriveApp: { Access: { PRIVATE: 'PRIVATE' }, Permission: { NONE: 'NONE' }, createFile: () => ({ setSharing() {} }) },
+    DriveApp: {
+      Access: { PRIVATE: 'PRIVATE' }, Permission: { NONE: 'NONE' },
+      _files: [],
+      createFile(blob) {
+        const f = {
+          _name: blob.name, _id: 'f' + (sandbox.DriveApp._files.length + 1),
+          getName() { return this._name; }, getId() { return this._id; },
+          getDateCreated() { return new Date(Date.now() - (sandbox.DriveApp._files.length * 1000)); },
+          getSize() { return String(blob.data || '').length; },
+          setSharing() { return this; }, setTrashed() { this._trashed = true; sandbox.DriveApp._files = sandbox.DriveApp._files.filter(x => x !== this); return this; }
+        };
+        sandbox.DriveApp._files.push(f);
+        return f;
+      },
+      getFilesByName(name) { const list = sandbox.DriveApp._files.filter(f => f._name === name); let i = 0; return { hasNext: () => i < list.length, next: () => list[i++] }; },
+      searchFiles(q) { const m = q.match(/'([^']+)'/); const tok = m ? m[1] : ''; const list = sandbox.DriveApp._files.filter(f => f._name.includes(tok)); let i = 0; return { hasNext: () => i < list.length, next: () => list[i++] }; }
+    },
     ContentService: {
       MimeType: { JSON: 'application/json' },
       createTextOutput: txt => ({ _t: txt, setMimeType() { return this; }, getContent() { return this._t; } })
@@ -583,6 +599,70 @@ t('開戶申請：批 ＝ 發一次性邀請 token；拒 ＝ 一定要原因；�
   /* 開返 */
   const sw2 = call(G, { action: 'setApplyMode', apikey: key, mode: 'open' });
   assert(sw2.data.mode === 'open', '開返唔啱');
+});
+
+/* ⑯ 備份 13 份輪替 ＋ 三時機提醒；PDPO（BUILD §3 §8） */
+t('備份：Drive 留 13 份（多過就刪最舊）；狀態回饋「7 日冇備份」等提醒', () => {
+  const { G, props, G: G2 } = makeSandbox(); G.initializeSheets();
+  const key = props.get('API_KEY');
+  eq(G.BACKUP_KEEP, 13, 'BUILD 寫留 13 份');
+  /* 冇備份過：要提醒做 */
+  let st = call(G, { action: 'backupState', apikey: key });
+  assert(st.data.missing === true && /未有備份紀錄/.test(st.data.remind), '未備份過要提醒：' + JSON.stringify(st.data));
+  /* 連續備份 16 次 → 只可以剩 13 份 */
+  for (let i = 0; i < 16; i++) G.backupToDrive();
+  const files = G2.DriveApp._files.filter(f => /^troop-/.test(f._name));
+  eq(files.length, 13, '超過 13 份要刪最舊');
+  const st2 = call(G, { action: 'backupState', apikey: key });
+  eq(st2.data.count, 13, '狀態要報實際份數');
+  assert(st2.data.triggers.beforeBatch && st2.data.triggers.beforeUpgrade && st2.data.triggers.weekly, '三個時機都要報');
+  assert(!/唔好|錯誤/.test(st2.data.remind) && typeof st2.data.remind === 'string', 'remind 要係人話');
+  /* 7 日冇備份 → stale：改返條紀錄嘅 JSON 內 at（＋表嘅 at 欄） */
+  const sh = G.ss_().getSheetByName('備份紀錄');
+  const row = sh.getLastRow();
+  const cell = sh.cell(row, 2);
+  const obj = JSON.parse(cell);
+  obj.at = '2020-01-01 00:00';
+  sh.setCell(row, 2, JSON.stringify(obj));
+  sh.setCell(row, 3, '2020-01-01 00:00');
+  const st3 = call(G, { action: 'backupState', apikey: key });
+  assert(st3.data.stale === true && /日冇備份/.test(st3.data.remind), '過期要提醒：' + JSON.stringify(st3.data.remind));
+});
+t('PDPO：離隊滿 12 個月預設只演練（dryRun）；真做＝匿名化（個人資料清走、紀錄留住）', () => {
+  const { G, props } = makeSandbox(); G.initializeSheets();
+  const key = props.get('API_KEY');
+  const h = 'a'.repeat(64);
+  call(G, { action: 'saveTable', apikey: key, table: '旅員', rows: [
+    { id: 'u-left', email: 'left@demo.hk', name: '離隊者', ymis: 'Y1', phone: '90000000', role: 'member', status: 'transferred_out', leftAt: '2020-01-01', hash: h, salt: 'salt12345' },
+    { id: 'u-now', email: 'now@demo.hk', name: '在隊', role: 'member', status: 'active', hash: h, salt: 'salt12345' }
+  ] });
+  const dry = call(G, { action: 'purgeLeftMembers', apikey: key, dryRun: true });
+  assert(dry.data.dryRun === true && dry.data.hit.length === 1, '預設應該只演練唔真做：' + JSON.stringify(dry.data));
+  eq(G.readTable_('旅員').length, 2, '演練唔應該改資料');
+  const real = call(G, { action: 'purgeLeftMembers', apikey: key, dryRun: false });
+  assert(real.data.anonymised === 1, '真做要匿名化：' + JSON.stringify(real.data));
+  const after = G.readTable_('旅員');
+  eq(after.length, 2, '紀錄要留住（唔係刪行）');
+  const left = after.find(u => u.id === 'u-left');
+  assert(!left.email && !left.phone && !left.hash && !left.ymis && left.status === 'anonymised', '個人資料要清走：' + JSON.stringify(left));
+  assert(left.anonymisedAt, '要記低幾時匿名化（審計要對得上）');
+  assert(!after.find(u => u.id === 'u-now').anonymisedAt, '在隊嘅唔應該郁');
+});
+t('PDPO：數據清單一張表（收集咩／用途／邊個睇到／保留幾久）', () => {
+  const { G, props } = makeSandbox(); G.initializeSheets();
+  const inv = call(G, { action: 'dataInventory', apikey: props.get('API_KEY') });
+  assert(inv.data.items.length >= 6 && inv.data.leftPurgeDays === 365, '數據清單唔齊：' + JSON.stringify(inv.data).slice(0, 120));
+  const keys = ['what', 'where', 'why', 'who', 'keep'];
+  inv.data.items.forEach(i => keys.forEach(k => assert(i[k] && String(i[k]).length > 2, `清單欄位缺 ${k}：` + JSON.stringify(i))));
+  assert(inv.data.items.some(i => i.what.includes('家長同意')), '要列家長同意（PDPO 開戶）');
+});
+t('開戶申請：帶家長同意欄位（唔打勾＝consent:false 照記，唔會偷偷當同意）', () => {
+  const { G } = makeSandbox(); G.initializeSheets();
+  call(G, { action: 'accountApply', ymis: 'Y7', name: '小明', consent: true });
+  call(G, { action: 'accountApply', ymis: 'Y8', name: '小華' });
+  const rows = G.readTable_('申請');
+  eq(rows.find(r => r.ymis === 'Y7').consent, true, '有打勾要記 true');
+  eq(rows.find(r => r.ymis === 'Y8').consent, false, '冇打勾要記 false（唔可以當同意）');
 });
 
 /* 收尾 */

@@ -212,10 +212,16 @@ npm run smoke    # jsdom（55 場景）：旅閘四條身份路、8 個視角（
                  #        ★ 求救制（免登入送出 → 旅側處理：開返閘／重設密碼／答覆結案；唔會自動做任何嘢）
                  #        ★ 超管唔經支部登記 → 任何支部／模組都入得（未登記／紅燈／閂咗都擋唔住）
                  #        ★ 前端 ↔ 後端通道：示範模式一律唔發請求（`code:'mock'`）；表名同 Code.gs 分頁對得上
-npm run gas-test # 旅 GAS：假 Apps Script 環境 23 項（sig 防護／逐表自證／審計鏈／hash 唔外洩／帳號下限／限流）
-npm run api-test # /api：PBKDF2 100k／session 防篡改／票據防重放／白名單／唔外洩 apikey
+                 #        ★ 匿名可寫面：四個公開頁（public／notice／borrow／join）真模式經同源 /api/proxy，
+                 #          前端／QR／URL 永遠唔見旅 GAS URL 同 key；三邊白名單（前端↔proxy↔GAS）要一模一樣
+                 #        ★ 備份（Drive 留 13 份／三時機提醒／匯入前警告）＋PDPO（離隊 12 個月、數據清單、同意欄）
+                 #        ★ 平台開旅：scripts/units.mjs（units.json ＋ env；檔永遠唔含 key／URL）
+npm run gas-test # 旅 GAS：假 Apps Script 環境 38 項（sig 防護／逐表自證／審計鏈／hash 唔外洩／帳號下限／限流／
+                 #             匿名可寫面＋限流分族／備份 13 輪替／PDPO 離隊 12 個月匿名化（預設演練））
+npm run api-test # /api：PBKDF2 100k／session 防篡改／票據防重放／白名單／唔外洩 apikey／匿名面過閘（回歸）
+npm run units -- list   # 平台開旅工具（data/units.json ＋ Vercel env 清單；check 會擋 key 入檔）
 npm run check    # 以上全部
 ```
 
-現況（2026-09-26 · P2）：`lint` 全綠（51 檔 · 888 KB）、`smoke` **76/76**、旅 GAS 本機測試 **34/34**、`/api` 測試 **19/19**；
+現況（2026-09-26 · P2b）：`lint` 全綠（53 檔 · 926 KB）、`smoke` **80/80**、旅 GAS 本機測試 **38/38**、`/api` 測試 **21/21**；
 教材（角色 ×5／模組／示範任務／開旅 checklist／開戶與批核）落 `docs/教材/`，UI「系統 → 教學」有同一份對照表。

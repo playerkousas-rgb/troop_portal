@@ -32,6 +32,8 @@ export const GAS_WHITELIST = [
   'registry', 'saveShare', 'saveRescue', 'getTombstones',
   /* P2：批核（開戶申請／申報）＋申請模式 */
   'decideApplication', 'setApplyMode', 'getApplyMode'
+  /* 匿名可寫面（noticeSignup／borrowApply／financeApply／progressApply／accountApply／saveRescue）
+     ＝下面 ANON_GAS，唔喺呢張表都入得閘（免得兩處名單走樣） */
 ];
 /** 只有旅長（role=chief）先可以用（寫入類／管治類） */
 export const CHIEF_ONLY = [
@@ -46,6 +48,11 @@ export const LEADER_ACTIONS = ['testDownstream', 'openAccountForDownstream', 'im
   'decideApplication'];   // 批核：旅長／教練員都做得（拒一定要有原因）
 /** 唔使 session 都讀得（只係健康／公開讀） */
 const PUBLIC_GAS = ['status'];
+/** 免登入寫得（＝GAS 匿名可寫面；限流 GAS 做，呢度再加一層）
+    通告報名／物資借用／收支申報／進度申報／開戶申請／求救 */
+export const ANON_GAS = ['noticeSignup', 'borrowApply', 'financeApply', 'progressApply', 'accountApply', 'saveRescue'];
+/** 匿名路徑唔准帶嘅欄位（防有人借匿名面寫入內部欄位） */
+export const ANON_FORBID = ['state', 'decidedBy', 'decidedAt', 'reason', 'perms', 'role', 'hash', 'password_hash', 'apikey'];
 
 const REPORT = {
   type: 'issue',
@@ -137,11 +144,14 @@ export default async function handler(req, res) {
   }
 
   /* ---------- action = 旅 GAS（白名單；server 側 inject apikey） ---------- */
-  if (GAS_WHITELIST.includes(action) || CHIEF_ONLY.includes(action) || LEADER_ACTIONS.includes(action)) {
+  /* ★ 匿名可寫面一定要入呢個閘：唔係嘅話白名單成立但路由去唔到，前端會收到 501「未實作」 */
+  if (GAS_WHITELIST.includes(action) || CHIEF_ONLY.includes(action) || LEADER_ACTIONS.includes(action) || ANON_GAS.includes(action)) {
     /* session 驗證（'status' 例外）→ 前端唔會、亦唔可以自己帶 key */
     const secret = process.env.SESSION_SECRET || '';
     const sess = verifySession(String(req.headers.cookie || '').split(';').map(x => x.trim()).find(x => x.startsWith('troop_session='))?.slice('troop_session='.length) || '', secret);
-    if (!PUBLIC_GAS.includes(action) && !sess) return send(res, 401, { success: false, error: '要登入（session 過期／未登入）', code: 'no_session' });
+    /* ★ 匿名可寫面：免 session（白名單＋唔准帶內部欄位；限流下面再做） */
+    const isAnon = !sess && ANON_GAS.includes(action);
+    if (!PUBLIC_GAS.includes(action) && !isAnon && !sess) return send(res, 401, { success: false, error: '要登入（session 過期／未登入）', code: 'no_session' });
     /* 權限：旅長 vs 教練員（隱藏超管唔喺 session 上，佢用 /api/super 票據，唔經呢條路） */
     if (sess) {
       const role = String(sess.role || '');
@@ -158,6 +168,12 @@ export default async function handler(req, res) {
     const unit = normUnit(body.unit || (sess && sess.unit) || '');
     if (!unit) return send(res, 400, { success: false, error: '要 unit（旅 ID）' });
     if (sess && sess.unit && normUnit(sess.unit) !== unit) return send(res, 403, { success: false, error: 'session 唔屬於呢個旅' });
+    /* 匿名可寫面：唔准帶內部欄位（防有人借匿名面寫入 state／role 之類） */
+    if (isAnon) {
+      const leaked = ANON_FORBID.filter(k => body.payload && typeof body.payload === 'object' && k in body.payload);
+      if (leaked.length) return send(res, 403, { success: false, error: `匿名唔可以帶呢啲欄位：${leaked.join('、')}`, code: 'anon_forbidden' });
+      console.log(`[proxy] ${at} anon=${action} unit=${unit}`);      // 只記 metadata（唔記內容）
+    }
     if (rateLimited(ip)) return send(res, 429, { success: false, error: '做得好密（10 分鐘最多 6 次）—— 請等一等再試' });
 
     const backend = process.env[`TROOP_${unit}_BACKEND`] || process.env[`TROOP_${String(unit).padStart(4, '0')}_BACKEND`] || '';

@@ -12,6 +12,7 @@
 <script type="module">
 import { esc, icon, money, fmtDate, fmtDateFull, toast, qrSvg, copyText, normId, todayISO } from './assets/js/lib/util.js';
 import * as S from './assets/js/lib/store.js';
+import { submitAnon, receiptText } from './assets/js/lib/public.js';
 
 const q = new URLSearchParams(location.search);
 const d = S.load();
@@ -155,7 +156,7 @@ if (!notice) {
     m.querySelector('.btn.primary').onclick = close;
   };
 
-  document.getElementById('sg-go').onclick = () => {
+  document.getElementById('sg-go').onclick = async () => {
     const name = document.getElementById('sg-name').value.trim();
     const ymis = normId(document.getElementById('sg-ymis').value.trim());
     const rel = document.getElementById('sg-rel').value;
@@ -182,8 +183,15 @@ if (!notice) {
       });
     });
     S.audit('通告報名（分享連結）', `${notice.title} · ${name}`, `${rel}/${attend}${ymis ? ' · ' + ymis : ''}`, 'LINK');
-    toast('已收到你嘅報名 —— 團長會喺系統見到', 'ok', '', null, 5000);
-    setTimeout(() => location.reload(), 900);
+    /* ★ 真模式：經同源 /api/proxy 送入旅 SHEET 待批表（匿名可寫面；前端永遠唔見旅 GAS URL／key） */
+    const res = await submitAnon('noticeSignup', {
+      ref: notice.id, title: notice.title, name, ymis, contact: document.getElementById('sg-contact').value.trim(),
+      note: `關係：${rel}／出席：${attend}／膳食：${document.getElementById('sg-meal').value}${document.getElementById('sg-note').value.trim() ? '／備註：' + document.getElementById('sg-note').value.trim() : ''}`,
+      branchId: '', consent
+    });
+    const rc = receiptText(res, { what: '報名' });
+    toast(rc.text, rc.tone === 'ok' ? 'ok' : (rc.tone === 'err' ? 'err' : ''), '', null, rc.tone === 'ok' ? 5000 : 7000);
+    if (res.ok) setTimeout(() => location.reload(), 900);
   };
 
   document.querySelectorAll('[data-sub]').forEach(c => c.addEventListener('change', () => {

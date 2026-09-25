@@ -12,6 +12,7 @@
 <script type="module">
 import { esc, icon, iso, addDays, todayISO, fmtDate, fmtDateFull, toast, normId, modal } from './assets/js/lib/util.js';
 import * as S from './assets/js/lib/store.js';
+import { submitAnon, receiptText } from './assets/js/lib/public.js';
 
 const d = S.load();
 const root = document.getElementById('pub');
@@ -145,7 +146,7 @@ function ask(itemId) {
     footer: `<button class="btn" data-close>取消</button><button class="btn primary" data-do>遞交申請</button>`,
     onMount: (dlg, close) => {
       dlg.querySelector('[data-close]').onclick = close;
-      dlg.querySelector('[data-do]').onclick = () => {
+      dlg.querySelector('[data-do]').onclick = async () => {
         const name = dlg.querySelector('#bq-name').value.trim();
         const qty = Number(dlg.querySelector('#bq-qty').value || 1);
         if (!name) return toast('請填申請人姓名', 'err');
@@ -169,6 +170,14 @@ function ask(itemId) {
         S.audit('物資借用申請（公開頁）', `${it.name} ×${qty}`, `${name}${rec.from ? ' · ' + rec.from : ''} → ${auto ? '旅部即時通過' : '待 ' + S.branchName(it.owner) + ' 批'}`, 'LINK');
         close();
         toast(auto ? '已即時通過（旅部物資）—— 記得約交收' : `已遞交 —— 等 ${S.branchName(it.owner)} 領袖批`, 'ok', '', null, 5200);
+        /* ★ 真模式：送入旅 SHEET 待批表（支部物資＝待批；旅部物資都會留紀錄） */
+        const res = await submitAnon('borrowApply', {
+          /* GAS 收 ref＝物資編號；其他欄位入 note（GAS 固定欄位：name／contact／ymis／branchId／note） */
+          ref: it.id, name, ymis: rec.ymis, contact: rec.contact, branchId: it.owner,
+          note: `物資：${it.name} ×${qty}／單位：${rec.from || '（未填）'}／用途：${rec.purpose || '（未填）'}／取 ${rec.at} 還 ${rec.due}`
+        });
+        const rc = receiptText(res, { what: '借用申請' });
+        toast(rc.text, rc.tone === 'err' ? 'err' : 'ok', '', null, 6500);
         setTimeout(draw, 400);
       };
     }

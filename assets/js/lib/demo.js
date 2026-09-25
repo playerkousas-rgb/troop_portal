@@ -467,6 +467,11 @@ export function makeDemo() {
     backend: JSON.parse(JSON.stringify(DEMO_BACKEND)),
     automations: JSON.parse(JSON.stringify(DEMO_AUTOMATIONS)),
     tutorials: JSON.parse(JSON.stringify(DEMO_TUTORIALS)),
+    backups: [                                  // 備份紀錄（Drive 留 13 份；示範用）
+      { at: '2026-09-20 02:00', file: 'troop-0082-202609200200.json', kb: 486 },
+      { at: '2026-09-13 02:00', file: 'troop-0082-202609130200.json', kb: 471 },
+      { at: '2026-09-06 02:00', file: 'troop-0082-202609060200.json', kb: 468 }
+    ],
     settings: {
       troopModulesMode: 'all',            // all | custom
       adminEmail: 'chief@demo.troop',

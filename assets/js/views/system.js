@@ -1,5 +1,6 @@
 /* 系統 — 旅團設定、模組開關、後端實況、審計、自動化、資料備份、PDPO、金鑰 */
 import { esc, icon, toast, downloadFile, copyText, fmtDate, fmtStamp, relTime, money } from '../lib/util.js';
+import * as API from '../lib/api.js';
 import * as S from '../lib/store.js';
 import { go } from '../lib/router.js';
 import { page, card, table, badge, notice, tabs, stat, kv, modal, empty, progressBar } from './ui.js';
@@ -10,9 +11,26 @@ const TABS = [
   ['automation', '自動化'], ['data', '資料與備份'], ['privacy', 'PDPO 與私隱'], ['keys', '接駁與金鑰']
 ];
 
+/** 備份狀態：示範模式由本機紀錄推算；真模式由 GAS `backupState` 覆寫（見 bindBackup） */
+export const BACKUP_KEEP = 13;
+export function localBackupState(d = S.load()) {
+  const rows = (d.backups || []).slice().sort((a, b) => String(a.at) < String(b.at) ? -1 : 1);
+  const last = rows[rows.length - 1] || null;
+  const at = last ? String(last.at || '') : '';
+  const ms = at ? Date.parse(at.replace(' ', 'T')) : NaN;
+  const ageDays = isFinite(ms) ? Math.floor((Date.now() - ms) / 86400000) : null;
+  return {
+    keep: BACKUP_KEEP, count: rows.length, lastAt: at, ageDays,
+    stale: ageDays !== null && ageDays >= 7, missing: !last,
+    remind: !last ? '未有備份紀錄：建議即刻做一次備份（升級／批量操作之前一定要）'
+      : (ageDays >= 7 ? `已經 ${ageDays} 日冇備份 —— BUILD 要求每週一次、留 ${BACKUP_KEEP} 份` : `備份仲新（${ageDays} 日前）`)
+  };
+}
+
 export function render(el, params, query = {}) {
   const tab = query.tab || 'troop';
   const d = S.load();
+  const backupState = localBackupState(d);
   const tabsHtml = `<div class="tabs">${TABS.map(([k, l]) => `<button class="${k === tab ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>`;
   let body = '';
 
@@ -164,14 +182,25 @@ export function render(el, params, query = {}) {
         <button class="btn" data-print>${icon('print', 14)} 列印現況</button>
       </div>
       <div class="mt-12">${notice('「含 hash」嘅檔用完即刻刪（Drive 建立後即設 PRIVATE、Permission NONE；Drive 失敗就寫 Logger，唔入 Sheet）。', 'warn')}</div>` })}
-    ${card({ title: '備份紀錄（示範）', body: table({
-      cls: 'tbl compact', head: ['時間', '大小', '方式', '狀態'],
-      rows: [
-        { cells: ['2026-09-25 02:00', '486 KB', '每週自動（Drive）', badge('保留第 1 份', 'g', true)] },
-        { cells: ['2026-09-18 02:00', '471 KB', '每週自動（Drive）', badge('保留第 2 份', 'g', true)] },
-        { cells: ['2026-09-23 15:20', '468 KB', '手動（升級前）', badge('保留', 'n', true)] }
-      ]
-    }) })}
+    ${card({ title: '備份（Drive 留 13 份）', sub: 'BUILD §3：每週自動 ＋ 13 份輪替；三時機提醒（升級前／批量操作前／7 日冇備份）', body: `
+      <div class="grid g3">
+        ${stat({ k: 'Drive 保留', v: backupState.count, u: `/ ${backupState.keep} 份`, tone: backupState.count >= backupState.keep ? 'warn' : 'ok' })}
+        ${stat({ k: '上次備份', v: backupState.ageDays === null ? '未做過' : backupState.ageDays, u: backupState.ageDays === null ? '' : '日前', tone: backupState.stale ? 'warn' : 'ok' })}
+        ${stat({ k: '輪替', v: '13', u: '份自動刪最舊' })}
+      </div>
+      ${notice(backupState.stale || backupState.count === 0
+      ? `⚠️ ${backupState.remind}`
+      : `✅ ${backupState.remind}`, backupState.stale || backupState.count === 0 ? 'warn' : 'ok')}
+      <div class="btn-row mt-8">
+        <button class="btn sm primary" data-backup>${icon('upload', 13)} 即刻做 Drive 備份</button>
+        <button class="btn sm" data-backup-export>${icon('download', 13)} 先落本機（唔靠 Drive）</button>
+      </div>
+      <div class="xs faint mt-8">備份檔建立後<b>即設 PRIVATE</b>、Permission NONE；超過 13 份自動刪最舊（只刪本系統命名格式嘅檔，唔會掂你 Drive 其他嘢）。</div>` })}
+    ${card({ title: '三時機提醒（照 BUILD 落）', body: `<div class="steps">
+      <div class="step"><div><b>升級前</b>：改版／搬遷之前撳一次「匯出 JSON」或 Drive 備份（有紀錄先好升級）。</div></div>
+      <div class="step"><div><b>批量操作前</b>：匯入／大批開戶／閂閘之前 —— 冇 7 日內嘅備份會先出警告。</div></div>
+      <div class="step"><div><b>7 日冇備份</b>：系統會喺呢一版提示（唔會自動幫你備 —— 備份一定要人手知）。</div></div>
+    </div>` })}
     `;
   } else if (tab === 'privacy') {
     const members = d.members.length;
@@ -287,6 +316,24 @@ export function render(el, params, query = {}) {
     const { confirmDlg } = await import('../lib/util.js');
     if (await confirmDlg({ title: '強制上載', message: '會跳過版本鎖，用呢部機嘅資料覆蓋後端。打字「上載」確認。', ok: '上載', danger: true, requireTyping: '上載' })) toast('（示範）已模擬強制上載', 'ok');
   });
+  el.querySelector('[data-backup]')?.addEventListener('click', async () => {
+    if (!API.isLive()) {
+      S.commit(x => { (x.backups = x.backups || []).push({ at: new Date().toISOString().slice(0, 16).replace('T', ' '), file: `troop-${d.unit.code}-（示範）.json`, kb: d.backend.rows ? Math.max(1, Math.round(d.backend.rows / 2)) : 1 }); });
+      S.audit('備份去 Drive', '（示範）', '示範模式：只入本機紀錄，冇真打 Drive');
+      toast('示範模式：已記一次備份（真模式會真打 GAS → Drive，並做 13 份輪替）', 'ok', '', null, 6000);
+      go('system?tab=data');
+      return;
+    }
+    toast('備份中…（GAS 會建立檔＋設 PRIVATE＋做 13 份輪替）', '');
+    const r = await API.gasAction('backupToDrive');
+    if (!r.ok) { toast(String(r.msg || r.code), 'err', '', null, 7000); return; }
+    toast(`已備份：${r.data.name}（${r.data.kb} KB）｜Drive 而家有 ${(r.data.kept || r.data.count || '?')} 份`, 'ok', '', null, 8000);
+    go('system?tab=data');
+  });
+  el.querySelector('[data-backup-export]')?.addEventListener('click', () => {
+    downloadFile(`troop-${d.unit.code}-backup.json`, JSON.stringify(S.exportAll(), null, 2));
+    toast('已落本機（唔靠 Drive）', 'ok');
+  });
   el.querySelector('[data-export]')?.addEventListener('click', () => {
     const j = S.exportAll();
     delete j._exportedFrom;
@@ -302,7 +349,10 @@ export function render(el, params, query = {}) {
     const m = modal({
       title: '匯入 JSON',
       body: `<label class="f"><span class="lb">貼上 JSON</span><textarea id="im-json" style="min-height:160px" placeholder='{"unit":…}'></textarea></label>
-      ${notice('匯入會驗 sha256（真模式）、transferId 冪等、撞號阻擋。', 'info')}`,
+      ${notice('匯入會驗 sha256（真模式）、transferId 冪等、撞號阻擋。', 'info')}
+      ${backupState.stale || backupState.count === 0
+      ? notice(`⚠️ <b>批量操作前提醒</b>：${backupState.remind}<br>建議先撳「即刻做 Drive 備份」或者「匯出 JSON」再匯入（匯入係覆蓋式，出事冇回頭）。`, 'warn')
+      : notice('批量操作前：已經有新鮮備份，可以放心匯入。', 'ok')}`,
       footer: `<button class="btn" data-close>取消</button><button class="btn primary" data-do>匯入</button>`
     });
     m.el.querySelector('[data-close]').onclick = m.close;

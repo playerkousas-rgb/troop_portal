@@ -94,6 +94,41 @@ t('proxy：破壞性 action 只有旅長做得（deleteRow／saveDbPart／purgeT
   ['resetPassword', 'deleteUser', 'setUserStatus', 'upsertUser'].forEach(a => assert(proxy.CHIEF_ONLY.includes(a), `${a} 應該係旅長專用`));
   assert(proxy.GAS_WHITELIST.includes('getTombstones') && !proxy.GAS_WHITELIST.includes('exportAll'), '墓碑讀得、匯出唔可以經前端');
 });
+t('proxy：匿名可寫面（免 session）＋唔准帶內部欄位', () => {
+  ['saveRescue', 'noticeSignup', 'borrowApply', 'financeApply', 'progressApply', 'accountApply'].forEach(a => {
+    assert(proxy.ANON_GAS.includes(a), `${a} 應該係匿名可寫面（BUILD §3）`);
+  });
+  assert(!proxy.ANON_GAS.includes('saveTables') && !proxy.ANON_GAS.includes('decideApplication'), '內部寫入／批核唔可以匿名');
+  ['state', 'decidedBy', 'perms', 'role', 'hash', 'apikey'].forEach(k => {
+    assert(proxy.ANON_FORBID.includes(k), `匿名路徑要擋住欄位：${k}`);
+  });
+});
+t('proxy：匿名可寫面真係入得閘（唔會跌去 501「未實作」）', async () => {
+  /* ★ 呢個係回歸測試：ANON_GAS 加咗但路由閘冇跟 → 匿名請求會收到 501 UI 先行。
+     呢度用真 handler 行一次（本機冇 env ＝ 應該係 503 not_configured，唔係 501）。 */
+  const call = async (payload) => {
+    let out = null;
+    const res = { setHeader() { }, statusCode: 0, end(t) { out = JSON.parse(t); } };
+    await proxy.default({ method: 'POST', url: '/api/proxy', headers: {}, body: payload }, res);
+    return { code: res.statusCode, body: out };
+  };
+  const ok = await call({ action: 'accountApply', unit: '82', payload: { name: 'T', ymis: 'YMIS-9', consent: true } });
+  eq(ok.code, 503, '匿名可寫面要行到去 env 檢查（未設＝503 not_configured）');
+  eq(ok.body.code, 'not_configured', '唔可以係 501 uiPhase');
+  assert(!ok.body.uiPhase, '唔應該再見到「UI 先行未實作」');
+  const leak = await call({ action: 'accountApply', unit: '82', payload: { state: 'approved' } });
+  eq(leak.code, 403, '匿名帶內部欄位要 403');
+  eq(leak.body.code, 'anon_forbidden', '要回 anon_forbidden');
+  const notAnon = await call({ action: 'deleteUser', unit: '82', payload: {} });
+  eq(notAnon.code, 401, '白名單以外免登入＝401');
+  eq(notAnon.body.code, 'no_session', '要回 no_session');
+  /* 六支匿名 action 全部都要過到 session 閘（唔止一支） */
+  for (const a of proxy.ANON_GAS) {
+    const r = await call({ action: a, unit: '82', payload: { ref: 'x', name: 'T' } });
+    assert(r.code !== 501, `${a} 匿名唔應該被當「未實作（UI 先行）」：${r.code}`);   // 503 not_configured／504 連唔到／200 都算過咗閘
+  }
+});
+
 t('proxy：申請批核／申請模式嘅權限（批核＝領袖、改政策＝旅長）', () => {
   assert(proxy.LEADER_ACTIONS.includes('decideApplication'), '批核應該旅長／教練員都做得');
   assert(proxy.CHIEF_ONLY.includes('setApplyMode'), '改開戶申請模式應該只旅長做得');

@@ -89,7 +89,8 @@ var ACTIONS = ['status', 'dbInfo', 'load', 'loadTables', 'saveTables', 'saveTabl
   'setLocalLogin', 'openAccountForDownstream', 'listModules', 'setModule', 'exportAll', 'importAll',
   'saveAudit', 'logAccess', 'getAuditLog', 'getAccessLog', 'purgeOldLogs', 'backupToDrive', 'setupWithToken',
   'registry', 'setUnitStatus', 'saveShare', 'saveRescue', 'deleteRow', 'getTombstones', 'saveDbPart', 'purgeTombstones',
-  'noticeSignup', 'borrowApply', 'financeApply', 'progressApply', 'accountApply', 'decideApplication', 'setApplyMode', 'getApplyMode'];
+  'noticeSignup', 'borrowApply', 'financeApply', 'progressApply', 'accountApply', 'decideApplication', 'setApplyMode', 'getApplyMode',
+  'backupState', 'purgeLeftMembers', 'dataInventory'];
 
 /** 需要 apikey（＝server 側）嘅敏感 action */
 var SERVER_ONLY = ['authUser', 'dbInfo', 'exportAll', 'importAll', 'backupToDrive', 'purgeOldLogs'];
@@ -103,6 +104,15 @@ function stamp_(d) {
   d = d || now_();
   var p = function (n) { return ('0' + n).slice(-2); };
   return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+/** 解析 `YYYY-MM-DD HH:mm`（我哋自己 stamp_ 嘅格式）→ 毫秒；解析唔到回 NaN（唔會當「好舊」而誤清） */
+function parseStamp_(s) {
+  var t = String(s || '').trim();
+  if (!t) return NaN;
+  var ms = Date.parse(t.replace(' ', 'T'));                 // 2026-09-26T10:30（本地時間）
+  if (isFinite(ms)) return ms;
+  ms = Date.parse(t.replace(/\//g, '-'));                   // 容忍 2026/09/26 10:30
+  return ms;
 }
 function uid_(prefix) { return (prefix || 'x') + '-' + new Date().getTime().toString(36) + '-' + Math.random().toString(36).slice(2, 7); }
 function sha256Hex_(s) { return bytesToHex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(s), Utilities.Charset.UTF_8)); }
@@ -419,6 +429,44 @@ function deleteRow(o) {
   return ok_({ deleted: true, table: table, rowId: String(o.rowId), left: kept.length, tombstone: true });
 }
 
+/* --------------------------- PDPO（BUILD §8） ------------------------------
+   離隊（TRANSFERRED_OUT／LEFT）滿 12 個月 → 匿名化（唔係直接刪，留住統計）；
+   另外：開戶帶家長同意欄位（見 applyPush_ 嘅 consent）；數據清單一張表（見 dataInventory）。
+   條文：PDPO 講「保留唔超過所需時間」—— 呢個就係嗰條線。 */
+var LEFT_PURGE_DAYS = 365;
+function purgeLeftMembers(o) {
+  var dry = !o || o.dryRun !== false;                 // 預設＝只報告，唔真做（安全）
+  var cutoff = now_().getTime() - LEFT_PURGE_DAYS * 24 * 3600 * 1000;
+  var rows = readUsers_(), hit = [], keep = [];
+  rows.forEach(function (u) {
+    var st = String(u.status || '');
+    var left = ['transferred_out', 'left', 'transferred', 'ended'].indexOf(st) >= 0;
+    var at = parseStamp_(u.leftAt || u.at);
+    var old = isFinite(at) && at < cutoff;
+    if (left && old) {
+      hit.push({ id: u.id, email: u.email, status: st, leftAt: u.leftAt || '', days: Math.floor((now_().getTime() - at) / 86400000) });
+      keep.push({ id: u.id, at: stamp_(), by: actor_(), status: 'anonymised', email: '', name: '（已離隊 · 已匿名化）', ymis: '', phone: '', hash: '', salt: '', perms: [], branchAccess: [], children: [], anonymisedAt: stamp_(), wasEmail: String(u.email || '').slice(0, 0) });
+    } else keep.push(u);
+  });
+  if (!hit.length) return { ok: true, dryRun: true, hit: [], kept: rows.length, msg: '冇滿 ' + LEFT_PURGE_DAYS + ' 日嘅離隊紀錄' };
+  if (dry) return { ok: true, dryRun: true, hit: hit, kept: rows.length, msg: '（演練）會匿名化 ' + hit.length + ' 個離隊滿 12 個月嘅戶 —— 要真做就傳 dryRun:false' };
+  var w = writeTable_('旅員', keep, actor_());
+  if (!w.ok) return { ok: false, msg: w.msg };
+  audit_(actor_(), 'PDPO 匿名化離隊成員', 'purgeLeftMembers', hit.map(function (h) { return h.email; }).join('、').slice(0, 200), 'menu');
+  return { ok: true, dryRun: false, hit: hit, anonymised: hit.length, kept: keep.length, msg: '已匿名化 ' + hit.length + ' 個離隊滿 12 個月嘅戶（紀錄留住，個人資料清走）' };
+}
+/** 數據清單一張表（PDPO：收集咩／用途／邊個睇到／保留幾久） */
+function dataInventory() {
+  return [
+    { what: '姓名／YMIS／聯絡', where: '旅員 分頁', why: '開戶、點名、通知家長', who: '旅長、教練員、該團領袖', keep: '在隊期間；離隊 12 個月後匿名化' },
+    { what: '密碼 hash（PBKDF2）', where: '旅員 分頁（hash／salt，唔存明文）', why: '登入驗證（只由 /api/auth 驗）', who: 'system（人睇唔到；讀取一律剝走）', keep: '改密碼即換；離隊即清' },
+    { what: '出席／報名／活動', where: '旅通告／旅行事曆／申請 分頁', why: '活動安排、統計', who: '該團領袖、旅部', keep: '24 個月' },
+    { what: '財務／物資', where: '財務整合／物資整合 分頁', why: '核數、借用歸還', who: '該團財務、旅長', keep: '24 個月' },
+    { what: '審計／操作紀錄', where: '審計紀錄／操作紀錄 分頁', why: '追責、防篡改（prev_hash 鏈）', who: '旅長（超管）', keep: '24 個月' },
+    { what: '求救／問題回報', where: '求救 分頁 ＋ Scout Admin 收件匣', why: '處理入唔到／問題', who: '旅部 ADMIN', keep: '24 個月' },
+    { what: '家長同意（收集聲明）', where: '申請 分頁 consent 欄', why: 'PDPO：開戶要家長／監護人同意', who: '該團領袖', keep: '同帳號' }
+  ];
+}
 function purgeOldLogs() {
   var cutoff = new Date(now_().getTime() - 24 * 30 * 24 * 3600 * 1000);
   var moved = 0;
@@ -842,14 +890,69 @@ function importAll(payload, opts) {
   audit_(actor_(), '匯入全庫', 'importAll', json_(out), 'menu');
   return { ok: out.failed === 0, data: out };
 }
+/* 備份：Drive 留 13 份（BUILD §3）——多過就刪最舊；檔名帶時戳（`troop-<unit>-YYYYMMDDHHmm.json`）
+   ★ 刪之前只刪**自己命名格式**嘅檔（唔會誤刪你 Drive 其他嘢） */
+var BACKUP_KEEP = 13;
+function backupFileName_() { return 'troop-' + (unitId_() || 'unit') + '-' + stamp_().replace(/[^\d]/g, '') + '.json'; }
+function listBackups_() {
+  var prefix = 'troop-' + (unitId_() || 'unit') + '-';
+  var it = DriveApp.getFilesByName('');
+  var out = [], guard = 0;
+  try {
+    var all = DriveApp.searchFiles("title contains '" + (unitId_() || 'unit') + "' and mimeType = 'application/json'");
+    while (all.hasNext() && guard++ < 500) {
+      var f = all.next(), nm = f.getName();
+      if (nm.indexOf(prefix) === 0 && /\.json$/.test(nm)) out.push({ id: f.getId(), name: nm, at: f.getDateCreated().getTime(), size: f.getSize() });
+    }
+  } catch (e) { Logger.log('searchFiles fail: ' + e); }
+  return out.sort(function (a, b) { return a.at - b.at; });
+}
+function rotateBackups_() {
+  var list = listBackups_(), removed = [];
+  while (list.length > BACKUP_KEEP) {
+    var oldest = list.shift();
+    try {
+      var it = DriveApp.getFilesByName(oldest.name);
+      while (it.hasNext()) { var f = it.next(); if (f.getId() === oldest.id) { f.setTrashed(true); removed.push(oldest.name); break; } }
+    } catch (e) { Logger.log('trash fail: ' + e); }
+  }
+  return removed;
+}
+/** 三時機提醒（BUILD §3）：升級前／批量操作前／7 日冇備份 → 前端據此提示「先備份」 */
+function backupState() {
+  var rows = readTable_('備份紀錄');
+  var last = rows.length ? rows[rows.length - 1] : null;
+  var lastAt = last ? String(last.at || last.__at || '') : '';      // 表嘅 at 欄／JSON 內嘅 at 都認
+  var ageDays = null;
+  if (lastAt) {
+    var t = parseStamp_(lastAt);
+    if (isFinite(t)) ageDays = Math.floor((now_().getTime() - t) / 86400000);
+  }
+  var files = listBackups_();
+  return {
+    keep: BACKUP_KEEP, count: files.length, name: (files[files.length - 1] || {}).name || '',
+    lastAt: lastAt, ageDays: ageDays,
+    missing: !lastAt, stale: ageDays !== null && ageDays >= 7,
+    remind: (!lastAt ? '未有備份紀錄：建議即刻做一次 Drive 備份（升級／批量操作之前一定要）'
+      : (ageDays >= 7 ? '已經 ' + ageDays + ' 日冇備份 —— BUILD 要求每週一次、留 13 份' : '備份仲新（' + ageDays + ' 日前）')),
+    /** 三個時機：升級前、批量操作前、7 日冇備份 */
+    triggers: { beforeUpgrade: true, beforeBatch: true, weekly: true }
+  };
+}
 function backupToDrive() {
   var payload = exportAll();
-  var name = 'troop-' + (unitId_() || 'unit') + '-' + stamp_().replace(/[^\d]/g, '') + '.json';
+  var name = backupFileName_();
   var file = DriveApp.createFile(Utilities.newBlob(json_(payload), 'application/json', name));
   try { file.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE); } catch (e) { Logger.log('sharing fail: ' + e); }
-  pushRow_('備份紀錄', { note: 'Drive 備份', file: name, kb: Math.round(json_(payload).length / 1024) });
-  audit_(actor_(), '備份去 Drive', name, '私密（建立後即設 PRIVATE）', 'menu');
-  return { ok: true, msg: '已備份：' + name + '（' + Math.round(json_(payload).length / 1024) + ' KB）' };
+  var kb = Math.round(json_(payload).length / 1024);
+  pushRow_('備份紀錄', { note: 'Drive 備份', file: name, kb: kb, sha256: (payload.meta || {}).sha256 || '' });
+  var removed = rotateBackups_();                    // 13 份輪替
+  audit_(actor_(), '備份去 Drive', name, '私密（建立後即設 PRIVATE）；輪替刪 ' + removed.length + ' 個舊檔', 'menu');
+  var keptCount = listBackups_().length;
+  return {
+    ok: true, name: name, kb: kb, keep: BACKUP_KEEP, kept: keptCount, rotatedOut: removed,
+    msg: '已備份：' + name + '（' + kb + ' KB）' + (removed.length ? '；舊檔刪咗 ' + removed.length + ' 個（留 ' + BACKUP_KEEP + ' 份）' : '' + '（Drive 而家有 ' + listBackups_().length + ' 份）')
+  };
 }
 
 /* --------------------------- 邀請 ---------------------------------------- */
@@ -1200,6 +1303,12 @@ function dispatch_(action, body, params) {
       return wp.ok ? ok_({ part: pn, sheet: target, rows: (body.rows || []).length, confirmed: true }) : err_('write_fail', wp.msg);
     }
     case 'purgeTombstones': return ok_({ purged: purgeTombstones() });
+    case 'backupState': return ok_(backupState());
+    case 'purgeLeftMembers': {
+      var pl = purgeLeftMembers(body);
+      return pl.ok ? ok_(pl) : err_('purge_fail', pl.msg || '清唔到');
+    }
+    case 'dataInventory': return ok_({ items: dataInventory(), leftPurgeDays: LEFT_PURGE_DAYS });
     case 'getTombstones': {
       var tl = tombstones();
       if (body.table) tl = tl.filter(function (x) { return x.table === body.table; });
@@ -1277,6 +1386,7 @@ function applyPush_(kind, o, dedupeKey) {
     title: String(o.title || '').slice(0, ANON_MAX_ROWS.title),
     note: String(o.note || '').slice(0, ANON_MAX_ROWS.note),
     ref: sanitizeLabel_(o.ref || ''),                 // 通告／物資／期數嘅 id
+    consent: !!(o.consent),                           // PDPO：開戶要家長／監護人同意（前端一定要見到打勾）
     state: 'pending', via: 'anon', ip: String(CTX.ip || '').slice(0, 40),
     dedupe: dedupeKey || '', decidedBy: '', decidedAt: '', reason: ''
   };

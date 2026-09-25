@@ -61,6 +61,26 @@ export function render(el, params, query = {}) {
     ${card({ title: '旅閘診斷', sub: '旅長撳「診斷」時，平台側要對得上', body: `
       <div class="btn-row"><button class="btn sm" id="pf-diag">${icon('info', 13)} 模擬旅閘診斷輸出</button>
       <button class="btn sm" id="pf-copy">${icon('copy', 13)} 複製 units.json</button></div>` })}
+    ${card({ title: '開旅／接入（工具：scripts/units.mjs）', sub: '唔使手改 JSON，減少打錯旅 ID', body: `
+      <div class="steps">
+        <div class="step"><div><b>① 核對</b>：對方 <span class="mono">/exec</span> 通唔通（撳「測試連線」）＋ KEY 對唔對得上。</div></div>
+        <div class="step"><div><b>② 加 entry</b>：<span class="mono">npm run units -- add --id 82 --name "第八十二旅" --district 香港 --branches 5</span></div></div>
+        <div class="step"><div><b>③ 印 env</b>：<span class="mono">npm run units -- env --id 82</span> → 貼落 Vercel（值唔會入 git）</div></div>
+        <div class="step"><div><b>④ Redeploy</b> → 撳「模擬旅閘診斷」睇 <span class="mono">?diag=1</span> 有冇認到 → 通知申請人。</div></div>
+      </div>
+      <div class="mono-block mt-8">${esc([
+        '# 加／更新一個旅',
+        'npm run units -- add --id 82 --name "第八十二旅" --district 香港 --branches 5',
+        '',
+        '# 印 Vercel env（值自己填；檔永遠唔含 key）',
+        'npm run units -- env --id 82',
+        '  TROOP_82_BACKEND=https://script.google.com/macros/s/…/exec',
+        '  TROOP_82_APIKEY=troop_…（GAS 選單「🔑 顯示 BACKEND／APIKEY」）',
+        '',
+        '# 驗格式／私隱（跑得過先 commit）',
+        'npm run units -- check'
+      ].join('\n'))}</div>
+      <div class="btn-row mt-8"><button class="btn sm" id="pf-units-diag">${icon('info', 13)} 睇真 · /api/units?diag=1</button></div>` })}
     `;
   } else {
     body = `
@@ -126,6 +146,18 @@ export function render(el, params, query = {}) {
   });
 
   el.querySelectorAll('[data-tab]').forEach(t => t.addEventListener('click', () => go('platform?tab=' + t.dataset.tab)));
+  el.querySelector('#pf-units-diag')?.addEventListener('click', async () => {
+    try {
+      const r = await fetch('/api/units?diag=1');
+      const j = await r.json();
+      modal({
+        title: '真 · /api/units?diag=1',
+        body: `<div class="mono-block">${esc(JSON.stringify(j.data || j, null, 2))}</div>
+          <div class="xs faint mt-8">★ 只列<b>變數名</b>同齊唔齊，永遠冇值。唔見得 <span class="mono">TROOP_&lt;旅ID&gt;_BACKEND</span> 就係 Vercel env 未設／未 Redeploy。</div>`,
+        footer: `<button class="btn primary" onclick="this.closest('.mask').remove()">明白</button>`
+      });
+    } catch (e) { toast('攞唔到：' + e.message, 'err'); }
+  });
   el.querySelectorAll('[data-ok]').forEach(b => b.addEventListener('click', () => {
     const a = d.applications.find(x => x.id === b.dataset.ok);
     S.commit(dd => { const t = dd.applications.find(x => x.id === a.id); if (t) { t.state = 'approved'; t.decidedBy = '平台超管'; } });

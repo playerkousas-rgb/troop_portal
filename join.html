@@ -10,9 +10,10 @@
 <body class="pub-page">
 <div id="pub"></div>
 <script type="module">
-import { esc, icon, toast, todayISO, fmtDate } from './assets/js/lib/util.js';
+import { esc, icon, toast, todayISO, fmtDate, normId } from './assets/js/lib/util.js';
 import { ageFromDob } from './assets/js/lib/registry.js';
 import * as S from './assets/js/lib/store.js';
+import { submitAnon, receiptText } from './assets/js/lib/public.js';
 import { redeemInvite } from './assets/js/lib/auth.js';
 
 const d = S.load();
@@ -46,6 +47,59 @@ function chrome(inner, tag = '') {
     </div><div id="toasts"></div>`;
 }
 
+/* ★ 冇邀請＝唔會即時開戶。純邀請制：你可以「表達想開戶」，旅長／教練員核對之後
+   一係幫你開戶、一係發一條邀請 token —— 呢個都係 proxy 匿名可寫面（accountApply）。 */
+function applyCard() {
+  const mode = d.settings?.applyMode || 'open';
+  return `<div class="card mt-16">
+    <div class="card-h"><div><h3 class="mb-0">想開戶但冇邀請？</h3>
+      <div class="card-sub">${mode === 'invite'
+      ? '本旅而家設咗「純邀請制」：唔會即時開戶，一定要旅長／教練員核對完再發邀請。'
+      : '可以留低資料，旅長／教練員核對名冊之後：一係直接幫你開戶，一係發一條一次性邀請連結。'}</div></div></div>
+    <div class="grid g2">
+      <label class="f"><span class="lb">姓名</span><input type="text" id="ap-name" placeholder="李美儀"></label>
+      <label class="f"><span class="lb">身份</span><select id="ap-kind">
+        <option value="parent">家長／監護人</option>
+        <option value="member">支部人員（團長／副團長／成員）</option>
+        <option value="coach">教練員（旅層／跨團幫手）</option>
+        <option value="other">其他（請喺備註寫）</option></select></label>
+      <label class="f"><span class="lb">YMIS／SCOUT_ID（必填 · 核對名冊用）</span><input type="text" id="ap-ymis" placeholder="YMIS-2001"></label>
+      <label class="f"><span class="lb">聯絡（電話／電郵）</span><input type="text" id="ap-contact" placeholder="9123 4567"></label>
+      <label class="f"><span class="lb">想入邊個支部（可空 · 寫支部代號最好）</span><input type="text" id="ap-branch" placeholder="sc / vs / rs"></label>
+      <label class="f"><span class="lb">備註（可空）</span><input type="text" id="ap-note" placeholder="例：今年新入團；子女喺童軍團"></label>
+    </div>
+    <label class="check mt-8"><input type="checkbox" id="ap-consent"> 我明白個人資料按 PDPO 處理（只用於團務；離隊 12 個月後刪除或匿名化）</label>
+    <div class="btn-row mt-8"><button class="btn primary" id="ap-go">${icon('upload', 14)} 遞交開戶申請</button></div>
+    <div class="xs faint mt-8">唔會即時開戶；亦唔會自動登入。批咗會有一次性邀請連結（24 小時、用一次即廢）。</div>
+  </div>`;
+}
+
+/** 綁落 applyCard()（只有「冇有效邀請」版先有） */
+function bindApply() {
+  const go = root.querySelector('#ap-go');
+  if (!go) return;
+  go.onclick = async () => {
+    const name = root.querySelector('#ap-name').value.trim();
+    const ymis = normId(root.querySelector('#ap-ymis').value.trim());
+    if (!name) return toast('請填姓名', 'err');
+    if (!ymis) return toast('要填 YMIS／SCOUT_ID —— 冇會員編號唔開得戶（防亂認人）', 'err');
+    if (!root.querySelector('#ap-consent').checked) return toast('請先讀同意聲明（PDPO）', 'err');
+    go.disabled = true;
+    const res = await submitAnon('accountApply', {
+      /* GAS 固定欄位：name／contact／ymis／branchId／email／title／note／consent */
+      name, ymis, contact: root.querySelector('#ap-contact').value.trim(),
+      branchId: root.querySelector('#ap-branch').value.trim(),
+      title: root.querySelector('#ap-kind').selectedOptions[0].textContent,
+      note: root.querySelector('#ap-note').value.trim(), consent: true
+    });
+    const rc = receiptText(res, { what: '開戶申請' });
+    S.audit('開戶申請（公開頁）', name, `${root.querySelector('#ap-kind').value}${ymis ? ' · ' + ymis : ''} → ${res.ok ? '已送旅部待批' : res.code}`, 'LINK');
+    toast(rc.text, rc.tone === 'err' ? 'err' : 'ok', '', null, 7000);
+    if (res.ok) setTimeout(() => location.reload(), 1200);
+    else go.disabled = false;
+  };
+}
+
 function demoLinks() {
   return `<div class="card mt-16"><div class="card-h"><div><h3 class="mb-0">示範用嘅有效連結</h3>
     <div class="card-sub">呢啲 token 係示範資料；你可以直接撳入去試開戶流程</div></div></div>
@@ -74,7 +128,9 @@ if (st !== 'ok') {
       </div>
       <div class="xs faint mt-8">要新連結？登入旅系統 →「帳號與對外 → 用戶與身份 → 邀請連結」重新發一條（旅長／教練員先有權；支部人員嘅邀請由該團發）。</div>
     </div>
+    ${applyCard()}
     ${demoLinks()}`);
+  bindApply();
 } else {
   root.innerHTML = chrome(`
     <div class="card">

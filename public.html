@@ -11,9 +11,10 @@
 <body class="pub-page">
 <div id="pub"></div>
 <script type="module">
-import { esc, icon, money, fmtDate, fmtDateFull, qrSvg, copyText, toast } from './assets/js/lib/util.js';
+import { esc, icon, money, fmtDate, fmtDateFull, qrSvg, copyText, toast, modal } from './assets/js/lib/util.js';
 import * as S from './assets/js/lib/store.js';
 import { VIS_LEVELS } from './assets/js/lib/registry.js';
+import { submitAnon, receiptText, isLive } from './assets/js/lib/public.js';
 
 const d = S.load();
 const base = location.origin + location.pathname.replace(/[^/]*$/, '');
@@ -114,6 +115,16 @@ document.getElementById('pub').innerHTML = `
         <div class="btn-row mt-8"><a class="btn sm" href="borrow.html">${icon('box', 13)} 睇物資</a></div>
       </div>
       <div class="pub-item">
+        <div class="bold">想開戶但冇邀請？</div>
+        <div class="sm">免登入遞交開戶申請（要 YMIS 核對名冊）。旅長／教練員核對完，一係幫你開戶、一係發邀請連結。</div>
+        <div class="btn-row mt-8"><a class="btn sm" href="join.html">${icon('users', 13)} 填開戶申請</a></div>
+      </div>
+      <div class="pub-item">
+        <div class="bold">求救（支部登入閂咗／密碼入唔到）</div>
+        <div class="sm">求救掣<b>免登入</b>。只係請求，唔會自動開閘；旅側 ADMIN 人手處理。</div>
+        <div class="btn-row mt-8"><button class="btn sm danger" id="pub-rescue">${icon('warn', 13)} 求救</button></div>
+      </div>
+      <div class="pub-item">
         <div class="bold">分享呢一頁</div>
         <div class="sm">QR／連結唔會帶任何 key（密鑰只存伺服器）。</div>
         <div class="btn-row mt-8"><button class="btn sm" id="pub-copy">${icon('copy', 13)} 複製連結</button><button class="btn sm" id="pub-qr">${icon('qr', 13)} QR</button></div>
@@ -129,6 +140,44 @@ document.getElementById('pub').innerHTML = `
 </div>
 <div id="toasts"></div>`;
 
+/* ★ 免登入求救：只係一封請求（GAS saveRescue → 旅側待處理），唔會自動開返登入 */
+document.getElementById('pub-rescue').onclick = () => modal({
+  title: '求救（免登入）',
+  body: `<div class="info-box">${icon('info', 15)}<div class="grow">求救<b>唔會</b>自動開返登入／改密碼。旅側 ADMIN 收到之後人手處理（開返登入／重設密碼／答覆結案）。
+    ${isLive() ? '真模式：直接送旅後端。' : '示範模式：只記本機紀錄。'}</div></div>
+    <label class="f mt-12"><span class="lb">你嘅名</span><input type="text" id="rs-name" placeholder="李美儀"></label>
+    <label class="f"><span class="lb">聯絡（電話／電郵）</span><input type="text" id="rs-contact" placeholder="9123 4567"></label>
+    <label class="f"><span class="lb">邊個支部</span><input type="text" id="rs-branch" placeholder="sc / 童軍團"></label>
+    <label class="f"><span class="lb">咩事</span><select id="rs-kind">
+      <option value="loginkilled">支部系統登入被閂咗</option>
+      <option value="forgotpw">密碼唔記得／入唔到</option>
+      <option value="nosheet">睇唔到支部 SHEET</option>
+      <option value="other">其他（請寫詳情）</option></select></label>
+    <label class="f"><span class="lb">詳情</span><textarea id="rs-note" rows="3" placeholder="例：上星期開始入唔到，顯示 403"></textarea></label>`,
+  footer: `<button class="btn" data-x>取消</button><button class="btn primary" data-do>送出求救</button>`,
+  onMount: (dlg, close) => {
+    dlg.querySelector('[data-x]').onclick = close;
+    dlg.querySelector('[data-do]').onclick = async () => {
+      const name = dlg.querySelector('#rs-name').value.trim();
+      if (!name) return toast('請填你嘅名', 'err');
+      const payload = {
+        name, contact: dlg.querySelector('#rs-contact').value.trim(),
+        branchId: dlg.querySelector('#rs-branch').value.trim(),
+        title: '公開頁求救 · ' + dlg.querySelector('#rs-kind').selectedOptions[0].textContent,
+        note: dlg.querySelector('#rs-note').value.trim().slice(0, 2000), via: 'public.html'
+      };
+      const res = await submitAnon('saveRescue', { rescue: payload });
+      S.commit(dd => {
+        dd.rescues = dd.rescues || [];
+        dd.rescues.push({ id: 'rs-' + Date.now(), ...payload, at: new Date().toISOString().slice(0, 16).replace('T', ' '), state: '待處理', sent: res.ok });
+      });
+      S.audit('公開頁求救', payload.title, `${name}${payload.contact ? ' · ' + payload.contact : ''} → ${res.ok ? '已送旅後端' : res.code}`, 'PUB');
+      const rc = receiptText(res, { what: '求救' });
+      toast(rc.text, rc.tone === 'err' ? 'err' : 'ok', '', null, 8000);
+      close();
+    };
+  }
+});
 document.getElementById('pub-copy').onclick = () => copyText(location.href);
 document.getElementById('pub-qr').onclick = () => {
   const m = document.createElement('div');
