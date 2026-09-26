@@ -2,7 +2,7 @@
 
 > 香港童軍**旅系統**：整個生態嘅頂點（TROOP 層）。所有人由旅呢個窗口入，入到去先揀支部。
 >
-> **本輪狀態：UI 示範版開得＋後端已經寫好**（旅 `apps-script/Code.gs` ＋ 平台 `api/*.js` **九支**）。
+> **本輪狀態：UI 示範版開得＋後端已經寫好**（旅 `apps-script/Code.gs` ＋ 平台 `api/*.js` **10 支**）。
 > 示範模式唔會發任何請求；真模式要跟 **[docs/後端部署步驟.md](docs/後端部署步驟.md)** 放 env 先通。
 > ★ 離線優先：🟡 有未寫入／🔴 寫入有問題／🟢 同後端一致（`assets/js/lib/offline.js`）；撞版**唔會自動覆蓋**。
 >
@@ -34,7 +34,7 @@ npm run preflight  # 上線前檢查：env 齊唔齊、部署體積、私隱（�
 
 | 身份 | 示範帳號 | 睇得到咩 |
 |---|---|---|
-| 旅長／教練員 | `chief@demo.troop`／`coach@demo.troop` | 旅長＝15 個模組；教練員＝除「系統」外，只睇獲授權支部 |
+| 旅長／教練員 | `chief@demo.troop`／`coach@demo.troop` | 旅長＝14 個模組（16 個減「我的子女」同隱藏嘅超管）；教練員＝除「系統」外，只睇獲授權支部 |
 | 家長（監護人） | `parent@demo.troop` | 我的子女（跨 2 個支部）、通告、行事曆、繳費 |
 | 支部人員（**先揀團**） | 幼童軍團 `cs-leader@demo.troop`（團長）／`cs-deputy@demo.troop`（副團長）；深資童軍團 `vs-exec@demo.troop`（執委·主席）／`vs-team@demo.troop`（團隊長·18+）；童軍團 `sc-cpl@demo.troop`（副隊長·未夠 18） | 我的支部、通告、行事曆、物資；團長／副團長多「支部」入口 |
 | 平台超管（隱藏） | `super@platform.local`（入口 `index.html?step=super` 或旅閘撳 ⚜ 五下） | 平台：接入收件匣、units、金鑰輪換；唔會出現喺任何名單 |

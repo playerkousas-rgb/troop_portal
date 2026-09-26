@@ -16,7 +16,7 @@
 npm run dev          # → http://localhost:8080/
 # 或者
 python3 -m http.server 8000     # 任何靜態伺服器都可以（零 build、零依賴）
-npm run check        # lint（語法／匯入圖／註冊表／CSS class／體積）＋ jsdom smoke（32 個場景：4 個角色 × 全部路由、13 模組 × 全部分頁、355 個掣逐個撳）
+npm run check        # lint（語法／匯入圖／註冊表／CSS class／體積）＋ jsdom smoke（每個身份 × 全部路由、全部模組分頁、逐個掣撳一次；現行數字見第 6 節）
 ```
 
 **示範帳號（密碼一律 `demo1234`）** —— 按旅閘嘅**身份分流**入：
@@ -174,8 +174,8 @@ App 內已經有一頁「**功能藍圖**」（教學 → 功能藍圖，或 `#/
 
 | 項目 | 狀態 | 幾時做 |
 |---|---|---|
-| `/api/*` | ✅ 已寫好 **9 支**（proxy／auth／super／units／downstreams／troop／registry／member-entry／share；本機 18 項測試綠）；**未上真 Vercel** | 跟 [後端部署步驟](後端部署步驟.md) 放 env |
-| 旅 `Code.gs`（白名單 action、ScriptLock、逐表寫自證、sig、掣、匯出匯入） | ✅ 已寫好（本機 23 項測試綠）；**未上真 Sheet** | 同上 §1–§2 |
+| `/api/*` | ✅ 已寫好 **10 支**（proxy／auth／super／units／downstreams／troop／registry／member-entry／share／push；本機 27 項測試綠）；**未上真 Vercel** | 跟 [後端部署步驟](後端部署步驟.md) 放 env |
+| 旅 `Code.gs`（白名單 action、ScriptLock、逐表寫自證、sig、掣、匯出匯入） | ✅ 已寫好（本機 53 項測試綠）；**未上真 Sheet** | 同上 §1–§2 |
 | `/api/troop`（分層 cache 5／30 分鐘）／`member-entry`／`share`／`registry` | ✅ 已做（P1 · 2026-09-26） | 真環境實測 |
 | 真 sig 讀寫（路 S） | 旅側已實作；未同真下游對打 | 等團側補 `handleSignedRequest` |
 | 支部系統 403 頁嘅「🆘 求救」掣 | 屬團側（旅側 UI 同求救頁已做好） | 團側照抄一條連結（§4.5.1） |
@@ -185,7 +185,7 @@ App 內已經有一頁「**功能藍圖**」（教學 → 功能藍圖，或 `#/
 | 大庫分件／tombstone purge | ✅ `saveDbPart`／`deleteRow`＋`purgeTombstones`（90 日） | — |
 | merge3 欄位級合併 | ✅ `offline.js merge3／merge3Batch／merge3Rows`（同一格衝突逐格 ask；批量 serverTime 新者勝＋留底） | — |
 | 匿名可寫面（報名／借用／收支／進度／開戶） | ✅ GAS 白名單 action ＋限流＋待批表＋去重；批／拒（拒要原因） | 真環境實測 |
-| 教材三層 | ✅ `docs/教材/`（9 份）＋UI 對照表（smoke 驗冇死連結） | — |
+| 教材三層 | ✅ `docs/教材/`（13 份＋索引）＋UI 對照表（smoke 驗冇死連結） | — |
 | 成員端（各團 `members.html`） | 屬各支部 repo | 各團自己 |
 
 ## 5b. 真模式對接（P0 已寫好）
@@ -198,13 +198,13 @@ App 內已經有一頁「**功能藍圖**」（教學 → 功能藍圖，或 `#/
 | 前端唯一寫入掣 | `assets/js/main.js` ＋ `assets/js/lib/api.js` | 真模式（`_mock` 冇咗）→ `POST /api/proxy action=saveTables`（**只寫有改嘅表**）→ 讀返自證 → 真收據；示範模式零 fetch |
 | 旅 SHEET | `apps-script/Code.gs` | router／apikey＋sig 雙通道／白名單／ScriptLock／逐表寫自證／審計鏈／限流／帳號下限／registry／出站 sig／匯出匯入 |
 | 平台 | `api/{proxy,auth,super,units,downstreams}.js` | proxy 白名單轉發（inject apikey）／PBKDF2 100k 登入／票據／公開清單 |
-| 部署 | [docs/後端部署步驟.md](後端部署步驟.md) | ADMIN 人手步驟 ＋ 12 項驗收清單 |
+| 部署 | [docs/後端部署步驟.md](後端部署步驟.md) | ADMIN 人手步驟 ＋ 22 項驗收清單 |
 
 ## 6. 自動驗證（你自己都跑到）
 
 ```bash
 npm run lint     # 語法、import/export 對唔對得上、註冊表規矩、CSS class 有冇定義、體積、金鑰／localhost 禁區
-npm run smoke    # jsdom（55 場景）：旅閘四條身份路、8 個視角（旅長／教練員／家長／副隊長／團長／團員／超管／訪客）
+npm run smoke    # jsdom 全鏈 UI：旅閘四條身份路、8 個視角（旅長／教練員／家長／副隊長／團長／團員／超管／訪客）
                  #        × 全部路由、16 模組 × 全部分頁、全部掣逐個撳（連 async handler）、
                  #        公開頁 5 種 token 狀態、報名／借用／開戶／財務確認／物資批核／移交接收（冪等）／
                  #        ★ 分享：未接收唔會出現 → 接收後出現＋標來源 → 退回留理由 → rank 2 只可加註解
@@ -230,12 +230,12 @@ npm run smoke    # jsdom（55 場景）：旅閘四條身份路、8 個視角（
                  #        ★ 樂觀鎖：版本由 server 派；寫入帶 baseVersion，撞版＝conflict（自動重讀重合併一次）
                  #        ★ 移交：移出（TRANSFERRED_OUT tombstone）／套裝 sha256（canonical 欄序）／接收四道閘
                  #          （hash／transferId／冪等／撞號）／家長（同旅零改動 vs 轉旅停用＋邀請重開）
-npm run gas-test # 旅 GAS：假 Apps Script 環境 38 項（sig 防護／逐表自證／審計鏈／hash 唔外洩／帳號下限／限流／
+npm run gas-test # 旅 GAS：假 Apps Script 環境 53 項（sig 防護／逐表自證／審計鏈／hash 唔外洩／帳號下限／限流／
                  #             匿名可寫面＋限流分族／備份 13 輪替／PDPO 離隊 12 個月匿名化（預設演練））
 npm run api-test # /api：PBKDF2 100k／session 防篡改／票據防重放／白名單／唔外洩 apikey／匿名面過閘（回歸）
 npm run units -- list   # 平台開旅工具（data/units.json ＋ Vercel env 清單；check 會擋 key 入檔）
 npm run check    # 以上全部
 ```
 
-現況（2026-09-26 · P15）：`lint` 全綠（59 檔 · 1061 KB）、`smoke` **95/95**、旅 GAS 本機測試 **53/53**、`/api` 測試 **27/27**；
+現況（2026-09-26 · P15）：`lint` 全綠（59 檔 · 1063 KB）、`smoke` **95/95**、旅 GAS 本機測試 **53/53**、`/api` 測試 **27/27**；
 教材（角色 ×5／模組／示範任務／開旅 checklist／開戶與批核）落 `docs/教材/`，UI「系統 → 教學」有同一份對照表。
