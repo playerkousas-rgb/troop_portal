@@ -11,6 +11,7 @@ import { esc, icon, toast, modal, confirmDlg, fmtStamp, normId } from './lib/uti
 import { loginRouteFor, loginRouteMeta, REPORT } from './lib/registry.js';
 import { sendAdminReport } from './lib/report.js';
 import * as API from './lib/api.js';
+import { forgotPassword, setupWithToken } from './lib/api.js';
 import * as S from './lib/store.js';
 import { route, resolve, go, currentPath } from './lib/router.js';
 import { MODULES, GROUPS, moduleList, moduleAllowed, modulesForSession, moduleById, gateOfLink, gateMeta, RESCUE, rescueKindMeta } from './lib/registry.js';
@@ -115,7 +116,7 @@ function moduleForPath(p) {
 }
 
 /* ---------------- 未登入：旅閘 → 身份 → 登入 ---------------- */
-const GATE_STEPS = ['unit', 'role', 'branch', 'login', 'super', 'rescue'];
+const GATE_STEPS = ['unit', 'role', 'branch', 'login', 'super', 'rescue', 'setup'];
 function gateGo(step, extra = '') {
   location.href = location.pathname + '?step=' + step + (extra ? '&' + extra : '');
 }
@@ -123,6 +124,56 @@ function gateQuery() { return new URLSearchParams(location.search); }
 
 function renderGate() {
   const d = S.load();
+  const q0 = new URLSearchParams(location.search);
+  /* ---- 設密碼（第一個旅長 setup token／忘記密碼後重設）---- */
+  if (q0.get('step') === 'setup') {
+    document.body.innerHTML = `<div class="gate-wrap"><div class="gate" id="gate"></div><div id="toasts"></div>`;
+    const gate = document.getElementById('gate');
+    const token0 = q0.get('t') || '';
+    const email0 = q0.get('e') || '';
+    gate.innerHTML = `<div class="login-wrap"><div class="gate-hero">
+        <div class="logo">${icon('key', 22)}</div><h1 style="font-size:22px">設定密碼</h1>
+        <div class="faint sm">${esc(d.unit.name)} · 一次性 token 用完即廢</div></div>
+      <div class="card pad-l">
+        ${noticeBox('呢一版係「未登入」嘅設定頁：入完之後就可以用 email ＋ 新密碼登入。<b>任何職員都唔會問你密碼</b>，密碼經 HTTPS 交俾伺服器雜湊（PBKDF2-SHA256 100k），旅 SHEET 只存到 hash、salt，永遠存唔到明文。')}
+        <label class="f"><span class="lb">Email（你個戶口嘅 email）</span><input type="email" id="st-email" value="${esc(email0)}" autocomplete="username"></label>
+        <label class="f"><span class="lb">一次性 token（12 字）</span><input type="text" id="st-token" value="${esc(token0)}" autocomplete="one-time-code" placeholder="例：A1B2C3D4E5F6"></label>
+        <label class="f"><span class="lb">新密碼（最少 8 字）</span><input type="password" id="st-pw" autocomplete="new-password"></label>
+        <label class="f"><span class="lb">再打一次</span><input type="password" id="st-pw2" autocomplete="new-password"></label>
+        <div id="st-err"></div>
+        <button class="btn primary block mt-8" id="st-go">${icon('check', 15)} 設定密碼</button>
+        <hr>
+        <div class="xs faint">冇 token？喺登入頁撳「唔記得密碼」（真模式會寄一條連結俾你）；收唔到信就撳「🆘 求救」，旅長可以人手傳。</div>
+      </div>
+      <div class="center mt-12"><button class="btn sm" id="st-back">返登入</button></div>
+    </div>`;
+    const err = m => { const e = gate.querySelector('#st-err'); if (e) e.innerHTML = `<div class="err">${esc(m)}</div>`; };
+    gate.querySelector('#st-back').onclick = () => gateGo('login');
+    gate.querySelector('#st-go').onclick = async () => {
+      const email = gate.querySelector('#st-email').value.trim();
+      const token = gate.querySelector('#st-token').value.trim();
+      const pw = gate.querySelector('#st-pw').value;
+      const pw2 = gate.querySelector('#st-pw2').value;
+      if (!email) return err('請填 email');
+      if (!token) return err('請填一次性 token');
+      if (pw.length < 8) return err('密碼最少 8 字');
+      if (pw !== pw2) return err('兩次密碼唔同');
+      if (!API.isLive()) {
+        /* 示範模式：唔會假裝真嘅，但可以教你行一次流程 */
+        S.audit('設定密碼（示範）', email, '示範模式：唔會真設 —— 真模式先會交 server 雜湊');
+        toast('示範模式：呢步唔會真設密碼（真模式先會）。詳情見 docs/教材/08 開旅 checklist。', 'warn', '', null, 6500);
+        return gateGo('login');
+      }
+      gate.querySelector('#st-go').disabled = true;
+      const r = await setupWithToken(token, pw, email);
+      gate.querySelector('#st-go').disabled = false;
+      if (!r.ok) return err(r.msg || r.code || '設定唔到');
+      S.audit('設定密碼（成功）', email, 'token 已消耗；之後要強制改密碼');
+      toast('已設定！跟住用 email ＋ 新密碼登入。', 'ok', '', null, 5500);
+      gateGo('login');
+    };
+    return;
+  }
   document.body.innerHTML = `<div class="gate-wrap"><div class="gate" id="gate"></div><div id="toasts"></div>`;
   const gate = document.getElementById('gate');
   const q = gateQuery();
@@ -163,7 +214,8 @@ function renderGate() {
         </div>
       </div>
       <div class="center mt-12 xs faint">示範模式唔需要後端：所有資料住喺你部機（localStorage），唔會送去任何地方。</div>
-      <div class="center mt-12"><button class="btn sm warn" id="rescue">🆘 入唔到／有問題？求救</button>
+      <div class="center mt-12"><button class="btn sm" id="forgot">唔記得密碼？</button>
+        <button class="btn sm warn" id="rescue">🆘 入唔到／有問題？求救</button>
         <div class="xs faint mt-8">求救唔使登入（入唔到先用得着）；ADMIN 收到之後人手核實身份先處理，唔會自動開任何嘢。</div></div>
       <div class="center mt-12"><button class="btn primary" id="pick2">${icon('arrowR', 15)} 入 ${esc(d.unit.name)}</button></div>`;
 
@@ -177,6 +229,7 @@ function renderGate() {
       if (taps >= 5) { sessionStorage.setItem('troop.superHint', '1'); gateGo('super'); }
       else if (taps >= 3) toast(`（${5 - taps}…）`, '', '', null, 900);
     };
+    gate.querySelector('#forgot').onclick = () => askForgot(gate);
     gate.querySelector('#rescue').onclick = () => gateGo('rescue');
     gate.querySelector('#diag').onclick = () => modal({
       title: '登記診斷（只列變數名，冇值）',
@@ -511,12 +564,51 @@ function renderBranchLogin(gate, q) {
         <button class="unit-card" id="switch"><span class="emblem">${icon('refresh', 20)}</span><span class="grow"><span class="bold">揀第二個團</span><br><span class="xs faint">${d.branches.length} 個支部</span></span></button>
         <a class="unit-card" href="public.html" target="_blank" rel="noopener"><span class="emblem">${icon('globe', 20)}</span><span class="grow"><span class="bold">公開頁</span><br><span class="xs faint">免登入</span></span></a>
       </div>
-      <div class="center mt-12"><button class="btn sm warn" id="rescue">🆘 入唔到／唔記得密碼？求救</button>
+      <div class="center mt-12"><button class="btn sm" id="forgot">唔記得密碼？</button>
+        <button class="btn sm warn" id="rescue">🆘 入唔到／唔記得密碼？求救</button>
         <div class="xs faint mt-8">免登入送得：ADMIN 核實身份之後會開返／重設密碼，再通知你。</div></div>
     </div>`;
   bindLoginForm(gate, logins, { keepBranch: true });
+  gate.querySelector('#forgot').onclick = () => askForgot(gate);
   gate.querySelector('#switch').onclick = () => gateGo('branch');
   gate.querySelector('#rescue').onclick = () => gateGo('rescue', 'b=' + encodeURIComponent(bid));
+}
+
+/* ---- 忘記密碼：唔會講個 email 有冇戶口；寄唔到就老實講（交 token 俾旅長人手傳） ---- */
+function askForgot(gate) {
+  const m = modal({
+    title: '唔記得密碼（攞一次性重設連結）',
+    body: `${noticeBox('入你嘅 email —— 真模式會寄一條<b>一次性連結</b>（30 分鐘內有效、用完即廢）。<b>唔會</b>講個 email 有冇戶口（防有人探你係唔係團員）。密碼永遠由伺服器雜湊，任何職員都唔會問你密碼。')}
+      <label class="f mt-8"><span class="lb">Email</span><input type="email" id="fg-email" placeholder="you@example.hk" autocomplete="username"></label>
+      <div id="fg-out"></div>`,
+    footer: `<button class="btn" data-close>取消</button><button class="btn primary" data-go>寄／攞連結</button>`,
+    onMount: (dlg, close) => {
+      dlg.querySelector('[data-close]').onclick = close;
+      dlg.querySelector('[data-go]').onclick = async () => {
+        const email = dlg.querySelector('#fg-email').value.trim();
+        const out = dlg.querySelector('#fg-out');
+        if (!email) return out.innerHTML = `<div class="err">請填 email</div>`;
+        if (!API.isLive()) {
+          out.innerHTML = `<div class="warn-box">示範模式：唔會真寄信。真模式先會經 /api/auth 叫旅 GAS 發連結。<br>冇 token 就用「🆘 求救」，旅長可以人手傳。</div>`;
+          return;
+        }
+        dlg.querySelector('[data-go]').disabled = true;
+        const r = await forgotPassword(email);
+        dlg.querySelector('[data-go]').disabled = false;
+        if (!r.ok) return out.innerHTML = `<div class="err">${esc(r.msg || r.code || '送唔到')}</div>`;
+        const dd = r.data || {};
+        S.audit('要求重設密碼', email, dd.delivered ? '已寄連結' : (dd.token ? '未寄出（要人手傳）' : '已收到要求'));
+        out.innerHTML = dd.delivered
+          ? `<div class="info-box">✅ 如果呢個 email 有戶口，連結已經寄出（30 分鐘內有效）。<br>收唔到？睇下垃圾郵件；再唔得就撳「🆘 求救」搵旅長。<div class="mt-8"><button class="btn sm" data-setup>我已經有 token／連結 → 去設定密碼</button></div></div>`
+          : `<div class="warn-box">⚠️ 唔夠設定寄唔到信${dd.token ? ' —— 請旅長人手把下面個 token 交俾你（唔好公開貼）' : ''}。<br>${esc(dd.note || '')}
+             ${dd.token ? `<div class="mono-block mt-8">${esc(dd.token)}</div><div class="xs faint mt-8">旅長交俾你之後：撳下面「去設定密碼」。</div>` : ''}
+             <div class="mt-8"><button class="btn sm" data-setup>去設定密碼</button><button class="btn sm warn" data-rescue>🆘 求救</button></div></div>`;
+        out.querySelector('[data-setup]')?.addEventListener('click', () => { close(); gateGo('setup'); });
+        out.querySelector('[data-rescue]')?.addEventListener('click', () => { close(); gateGo('rescue'); });
+      };
+    }
+  });
+  return m;
 }
 
 /* ---- 登入表單（旅層／家長／支部通用） ---- */

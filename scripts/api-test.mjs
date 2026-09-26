@@ -10,7 +10,16 @@
 import { createHash } from 'node:crypto';
 
 let pass = 0; const fails = [];
-const t = (name, fn) => { try { fn(); pass++; console.log('  ✓ ' + name); } catch (e) { fails.push({ name, e }); console.log('  ✗ ' + name + '\n      ' + e.message); } };
+/* ★ 測試要**逐個序列化**跑：async 測試未跑完就開下一個，會互相踩（例如一個設
+   process.env.SESSION_SECRET、另一個同時讀）—— 之前就係咁樣「講咗通過先爆」。 */
+let chain = Promise.resolve();
+const t = (name, fn) => {
+  chain = chain.then(async () => {
+    try { await fn(); pass++; console.log('  ✓ ' + name); }
+    catch (e) { fails.push({ name, e }); console.log('  ✗ ' + name + '\n      ' + e.message); }
+  });
+};
+
 const assert = (c, m) => { if (!c) throw new Error(m || 'assert failed'); };
 const eq = (a, b, m) => assert(a === b, `${m || 'eq'}（got ${JSON.stringify(a)}，want ${JSON.stringify(b)}）`);
 
@@ -127,7 +136,7 @@ t('session：靜默刷新（滑動 30 分鐘、上限 8 小時、改 cookie 都�
   const r2 = await call(`troop_session=${oldTok}`, { action: 'refresh' });
   eq(r2.code, 401, '過咗 8 小時唔可以再續');
   eq(r2.body.code, 'reauth_required', '要明確叫重新登入（前端會提示）');
-  assert(String(r2.headers['Set-Cookie']).includes('Max-Age=0'), '要清 cookie');
+  assert(String(r2.headers['Set-Cookie']).includes('Max-Age=0'), '要清 cookie：' + JSON.stringify(r2.headers) + ' body=' + JSON.stringify(r2.body));
   /* 過期／亂改嘅飛 → 401，唔會續 */
   const expired = auth.signSession({ email: 'a@b.c', role: 'chief', unit: '82', pv: 1, born: Date.now() - 1000 }, secret, -1000);
   eq((await call(`troop_session=${expired}`, { action: 'refresh' })).code, 401, '過期飛唔可以續');
@@ -176,6 +185,30 @@ t('proxy：申請批核／申請模式嘅權限（批核＝領袖、改政策＝
   assert(proxy.GAS_WHITELIST.includes('decideApplication') && proxy.GAS_WHITELIST.includes('getApplyMode'), '批核／查模式要入白名單');
   assert(!proxy.GAS_WHITELIST.includes('accountApply'), '自助申請唔應該經 proxy（免登入路徑自己經 GAS 匿名面）');
 });
+t('忘記密碼：/api/auth forgot 防枚舉、有限流、唔會扮寄咗；setup 路線收 token', async () => {
+  const secret = 'test-secret-' + 'y'.repeat(20);
+  process.env.SESSION_SECRET = secret;
+  const fs = await import('node:fs');
+  const src = fs.readFileSync(new URL('../api/auth.js', import.meta.url), 'utf8');
+  assert(/action === 'forgot'/.test(src), '/api/auth 要有 forgot');
+  assert(/rateLimited\(ip, 'forgot'\)/.test(src), '忘記密碼要有限流（防狂寄信）');
+  assert(/issueResetToken/.test(src), '要叫 GAS 種 token（唔係前端自己作）');
+  assert(/delivered/.test(src) && /token: r\.data\?\.token/.test(src), '寄唔到要老實交 token 俾人手傳（唔會扮寄咗）');
+  assert(/setupFirstChief/.test(src) && /hashPassword\(body\.password\)/.test(src), '設密碼要 server 側 PBKDF2（GAS 唔見明文）');
+  /* 真 handler：冇設 env → 誠實 502／503，唔會扮成功 */
+  let out = null;
+  const res = { setHeader() { }, statusCode: 0, end(t) { out = JSON.parse(t); } };
+  await auth.default({ method: 'POST', url: '/api/auth', headers: {}, body: { action: 'forgot', unit: '82', email: 'a@b.c' } }, res);
+  assert([502, 503].includes(res.statusCode), '未設定 env 要誠實講：' + res.statusCode);
+  eq(out.success, false, '唔可以扮寄咗');
+  assert(!/a@b\.c/.test(JSON.stringify(out)), '唔應該回聲個 email');
+  /* 前端：登入頁有「唔記得密碼」＋設定密碼頁；示範模式零 fetch */
+  const main = fs.readFileSync(new URL('../assets/js/main.js', import.meta.url), 'utf8');
+  assert(/askForgot/.test(main) && /forgotPassword/.test(main), '登入頁要有「唔記得密碼」');
+  assert(/'setup'/.test(main) && /setupWithToken/.test(main), '要有設定密碼頁（setup token／重設連結共用）');
+  assert(/GATE_STEPS = \[[^\]]*'setup'/.test(main), 'setup 要係合法 gate 步驟');
+});
+
 t('proxy：移交（BUILD §6）＝旅長／教練員做得、白名單有、唔可以匿名', async () => {
   ['transferOut', 'importTransferBundle'].forEach(a => {
     assert(proxy.GAS_WHITELIST.includes(a), `${a} 要入 proxy 白名單`);
@@ -311,6 +344,7 @@ t('旅聚合：唔會回 URL／KEY（對下游只讀 registry）', async () => {
   assert(pulled.ok === false && pulled.code === 'not_configured', '未設定 env 要誠實失敗');
 });
 
+await chain;                               // 等所有測試（同步／async）真係跑完先報告
 console.log('');
 if (fails.length) {
   console.log(`✗ 旅 /api 測試唔過：${pass}/${pass + fails.length}\n`);

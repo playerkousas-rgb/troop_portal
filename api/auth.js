@@ -82,7 +82,18 @@ export async function gas(unit, body) {
 
 /* ------------------------- 限流（best-effort；逐個 warm instance） ------------------------- */
 const HITS = new Map();
+const FORGOT = new Map();                        // 忘記密碼：每 IP 每 10 分鐘最多 3 次（防有人狂寄信）
 const nowMs = () => Date.now();
+/** 忘記密碼限流（同登入失敗分開計） */
+function rateLimited(ip, kind) {
+  if (kind !== 'forgot') return false;
+  const w = 10 * 60 * 1000;
+  const a = (FORGOT.get(ip) || []).filter(t => nowMs() - t < w);
+  if (a.length >= 3) return true;
+  a.push(nowMs()); FORGOT.set(ip, a);
+  if (FORGOT.size > 5000) FORGOT.clear();
+  return false;
+}
 function fails(ip) { return (HITS.get(ip) || []).filter(t => nowMs() - t < FAIL.windowMs); }
 function bump(ip) { const a = fails(ip); a.push(nowMs()); HITS.set(ip, a); if (HITS.size > 5000) HITS.clear(); return a.length; }
 function clear(ip) { HITS.delete(ip); }
@@ -186,6 +197,30 @@ export default async function handler(req, res) {
     return send(res, 200, { success: true, data: { changed: true, pv: r.data?.pv, iter: h.iter } }, { 'Set-Cookie': clearCookies });
   }
 
+  /* ---- 忘記密碼：唔會講「有冇呢個 email」（防帳號枚舉），一律回 sent ----
+     GAS 側：有戶先種一次性 token（30 分鐘）＋寄連結；冇設定 APP_URL 或寄唔到
+     就回 token 俾旅長人手傳（唔會扮寄咗）。之後用同一條 setupFirstChief 路線落 hash。 */
+  if (action === 'forgot') {
+    if (!unit || !body.email) return send(res, 400, { success: false, error: '要 unit／email' });
+    const email = String(body.email).trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return send(res, 400, { success: false, error: 'email 格式唔啱' });
+    if (rateLimited(ip, 'forgot')) return send(res, 429, { success: false, error: '要求得太密 —— 請等 10 分鐘再試' });
+    const r = await gas(unit, { action: 'issueResetToken', email, ttlMin: 30 });
+    if (!r.ok) return send(res, 502, { success: false, error: '暫時寄唔到（' + r.msg + '）—— 可以喺登入頁撳「求救」搵旅長幫手', code: r.code });
+    await gas(unit, { action: 'saveAudit', actionName: 'PWRESET', target: email.slice(0, 60), detail: r.data?.delivered ? '已寄連結' : '未寄（要人手傳）', via: 'api' });
+    return send(res, 200, {
+      success: true,
+      data: {
+        sent: true,
+        delivered: !!r.data?.delivered,
+        /* 真係寄唔到（未設 APP_URL／MailApp 出錯）時，先把 token 交返俾領袖人手傳 —— 唔會扮寄咗 */
+        token: r.data?.token || '',
+        expMin: r.data?.expMin || 30,
+        nextStep: '喺 index.html?step=setup 入 email ＋ token ＋ 新密碼（或者撳信入面條連結）'
+      }
+    });
+  }
+
   /* ---- 邀請開戶 ---- */
   if (action === 'redeemInvite') {
     if (!unit || !body.token || !body.password) return send(res, 400, { success: false, error: '要 unit／token／password' });
@@ -206,5 +241,5 @@ export default async function handler(req, res) {
     return send(res, 200, { success: true, data: { email: (r.data && r.data.email) || body.email || '', ready: true } });
   }
 
-  return send(res, 501, { success: false, error: `action='${action}' 未實作`, allowed: ['login', 'logout', 'session', 'changePassword', 'redeemInvite', 'setupFirstChief'] });
+  return send(res, 501, { success: false, error: `action='${action}' 未實作`, allowed: ['login', 'logout', 'session', 'refresh', 'changePassword', 'redeemInvite', 'setupFirstChief', 'forgot'] });
 }

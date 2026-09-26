@@ -90,12 +90,12 @@ var ACTIONS = ['status', 'dbInfo', 'load', 'loadTables', 'saveTables', 'saveTabl
   'saveAudit', 'logAccess', 'getAuditLog', 'getAccessLog', 'purgeOldLogs', 'backupToDrive', 'setupWithToken',
   'registry', 'setUnitStatus', 'saveShare', 'saveRescue', 'deleteRow', 'getTombstones', 'saveDbPart', 'purgeTombstones',
   'noticeSignup', 'borrowApply', 'financeApply', 'progressApply', 'accountApply', 'decideApplication', 'setApplyMode', 'getApplyMode',
-  'backupState', 'purgeLeftMembers', 'dataInventory', 'getVersion',
+  'backupState', 'purgeLeftMembers', 'dataInventory', 'getVersion', 'issueResetToken',
   /* P4：移交與升降團（BUILD §6） */
   'transferOut', 'importTransferBundle'];
 
 /** 需要 apikey（＝server 側）嘅敏感 action */
-var SERVER_ONLY = ['authUser', 'dbInfo', 'exportAll', 'importAll', 'backupToDrive', 'purgeOldLogs'];
+var SERVER_ONLY = ['authUser', 'dbInfo', 'exportAll', 'importAll', 'backupToDrive', 'purgeOldLogs', 'issueResetToken'];
 
 /* --------------------------- 小工具 -------------------------------------- */
 function ss_() { return SpreadsheetApp.getActiveSpreadsheet(); }
@@ -271,6 +271,51 @@ function seedFirstChief(email, name) {
   return { ok: true, email: email, token: token, needHash: true };
 }
 function randomPw_() { return Utilities.getUuid().replace(/-/g, '').slice(0, 12); }
+
+/* --------------------------- 忘記密碼（BUILD §3：email 一次性連結） ---------------------
+   流程：用戶喺登入頁填 email → /api/auth → 呢支（server-only）：
+     ① 一定唔會講「有冇呢個 email」（防帳號枚舉）—— 回 sent:true 就算
+     ② 有嘅話：種一個一次性 setupToken（30 分鐘）＋寄一封帶連結嘅信
+     ③ 冇設定 APP_URL 或者寄唔到 → 照回 token 俾領袖人手傳（唔會扮寄咗）
+   之後：用戶撳連結 → 入新密碼 → /api/auth 算 PBKDF2 → setupWithToken 落 hash（GAS 永遠唔見明文） */
+function issueResetToken(body) {
+  if (CTX.mode !== 'server') return err_('server_only', '要 server 側做');
+  var email = String(body.email || '').trim();
+  if (!email) return err_('bad_email', '要 email');
+  var ttlMin = Math.max(5, Math.min(120, Number(body.ttlMin || 30)));
+  var rows = readUsers_();
+  var i = rows.map(function (r) { return String(r.email || '').toLowerCase(); }).indexOf(email.toLowerCase());
+  /* 防枚舉：搵唔到都回同一個形狀（sent:true），但唔會種 token、唔會寄信 */
+  if (i < 0) { access_('PWRESET', email, CTX.ip, 'no_user（唔會外洩邊個 email 有戶）'); return ok_({ sent: true, delivered: false, token: '', expMin: ttlMin }); }
+  if (String(rows[i].status || '') !== 'active' && String(rows[i].status || '') !== 'pending_hash') {
+    access_('PWRESET', email, CTX.ip, 'status=' + rows[i].status);
+    return ok_({ sent: true, delivered: false, token: '', expMin: ttlMin });   // 形狀要同「有戶」一樣（防枚舉）
+  }
+  var token = randomPw_().toUpperCase();
+  rows[i].setupToken = token;
+  rows[i].setupAt = stamp_();
+  rows[i].setupExp = new Date(Date.now() + ttlMin * 60000).toISOString();
+  rows[i].mustChangePw = true;
+  var w = writeTable_('旅員', rows, 'reset');
+  if (!w.ok) return err_('write_fail', w.msg);
+  var base = String(props_().getProperty('APP_URL') || '').replace(/\/+$/, '');
+  var link = base ? (base + '/index.html?step=setup&u=' + unitId_() + '&t=' + token + '&e=' + encodeURIComponent(email)) : '';
+  var delivered = false, note = '';
+  if (link) {
+    try {
+      MailApp.sendEmail({
+        to: email,
+        subject: '【' + unitId_() + ' 旅系統】重設密碼連結（' + ttlMin + ' 分鐘內有效）',
+        body: '你好，\n\n有人（可能係你）要求重設旅系統密碼。\n\n撳呢條一次性連結設定新密碼：\n' + link
+          + '\n\n連結 ' + ttlMin + ' 分鐘內有效、用完即廢。如果唔係你要求，可以唔理呢封信（你嘅密碼唔會變）。\n\n'
+          + '提提你：任何職員都唔會問你密碼。'
+      });
+      delivered = true;
+    } catch (e) { note = '寄唔到信（' + String(e.message || e) + '）—— 請旅長人手傳連結'; }
+  } else { note = '未設定 APP_URL（ScriptProperties）—— 請旅長人手傳連結'; }
+  audit_('（reset）', '發出重設密碼連結', email, (delivered ? '已寄出' : '未寄出') + '｜' + ttlMin + ' 分鐘', 'api');
+  return ok_({ sent: true, delivered: delivered, token: delivered ? '' : token, expMin: ttlMin, note: note });
+}
 
 /* --------------------------- 密碼 ---------------------------------------- */
 /* ⚠⚠ 鐵律：**呢支 GAS 永遠唔會自己 hash 或驗密碼。**
@@ -1175,16 +1220,21 @@ function dispatch_(action, body, params) {
       return err_('use_api_auth', '密碼登入由 /api/auth 處理（PBKDF2 ≥100k 喺 Node 先夠快）；呢支 GAS 唔會代驗密碼');
     }
     case 'superLogin': return dispatch_('login', body, params);
+    case 'issueResetToken': return issueResetToken(body);
     case 'setupWithToken': {
       /* 第一個旅長：/api/auth 用一次性 setup token 交 hash 落嚟（GAS 唔經手明文） */
       if (CTX.mode !== 'server') return err_('server_only', '要 server 側做');
       if (!validHashPair_(body.password_hash, body.password_salt)) return err_('bad_hash', '要 64 位 hex password_hash ＋ salt');
       var rowsT = readUsers_(), iT = rowsT.map(function (r) { return String(r.setupToken || ''); }).indexOf(String(body.token || ''));
       if (iT < 0) return err_('bad_token', 'setup token 唔啱（或者已經用過）');
+      /* 重設連結有時限（第一個旅長嘅 setup token 冇 exp ＝當長期有效，兼容舊流程） */
+      if (rowsT[iT].setupExp && String(rowsT[iT].setupExp) < new Date().toISOString()) {
+        return err_('token_expired', '連結已經過期 —— 請重新要求一次');
+      }
       rowsT[iT].hash = String(body.password_hash); rowsT[iT].salt = String(body.password_salt);
       rowsT[iT].algo = 'pbkdf2-sha256'; rowsT[iT].iter = Number(body.iter || 100000);
       rowsT[iT].status = 'active'; rowsT[iT].pv = 1; rowsT[iT].mustChangePw = false;
-      delete rowsT[iT].setupToken; delete rowsT[iT].setupAt;
+      delete rowsT[iT].setupToken; delete rowsT[iT].setupAt; delete rowsT[iT].setupExp;
       var wT = writeTable_('旅員', rowsT, 'setup');
       if (!wT.ok) return err_('write_fail', wT.msg);
       audit_('（setup）', '第一個旅長設密碼', rowsT[iT].email, 'setup token 已消耗', 'api');

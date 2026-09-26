@@ -84,6 +84,16 @@ export async function changePassword(email, newPassword, oldPassword) {
   const g = guard(); if (g) return g;
   return jfetch('/api/auth', { action: 'changePassword', unit: unitId(), email, newPassword, oldPassword });
 }
+/* 忘記密碼：要求一次性連結（唔會講個 email 有冇戶口） */
+export async function forgotPassword(email) {
+  const g = guard(); if (g) return g;
+  return jfetch('/api/auth', { action: 'forgot', unit: unitId(), email });
+}
+/* 一次性 setup token 設密碼（第一個旅長／重設密碼共用同一條路線；GAS 永遠唔見明文） */
+export async function setupWithToken(token, password, email) {
+  const g = guard(); if (g) return g;
+  return jfetch('/api/auth', { action: 'setupFirstChief', unit: unitId(), token, password, email });
+}
 export async function redeemInvite(token, password, email, name) {
   const g = guard(); if (g) return g;
   return jfetch('/api/auth', { action: 'redeemInvite', unit: unitId(), token, password, email, name });

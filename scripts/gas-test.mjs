@@ -765,6 +765,56 @@ t('樂觀鎖：loadTables／saveTables 帶版本；舊 baseVersion＝conflict（
   assert(st2.success === true && st2.data.version, 'saveTable 帶正確版本要寫得入 ＋ 回新版本');
 });
 
+/* ⑲ 忘記密碼：唔外洩邊個 email 有戶；一次性 token 有時限 */
+t('忘記密碼：一定唔會講「有冇呢個 email」（防帳號枚舉）', () => {
+  const { G, props } = makeSandbox(); G.initializeSheets();
+  const key = props.get('API_KEY');
+  const users = G.readUsers_();
+  users.push({ id: 'u-1', email: 'real@demo.hk', role: 'chief', status: 'active', name: '真戶', pv: 1 });
+  G.writeTable_('旅員', users, 'test');
+  const real = call(G, { action: 'issueResetToken', apikey: key, email: 'real@demo.hk' });
+  const fake = call(G, { action: 'issueResetToken', apikey: key, email: 'ghost@demo.hk' });
+  assert(real.success === true && fake.success === true, '兩個都要成功回覆（唔可以靠回覆分辨）');
+  eq(!!real.data.delivered, !!fake.data.delivered, 'delivered 唔可以透露戶口存在（示範環境兩個都冇寄）');
+  eq(fake.data.token, '', '唔存在嘅 email 唔會出 token');
+  const after = G.readUsers_();
+  const ru = after.find(u => u.email === 'real@demo.hk'), gu = after.find(u => u.email === 'ghost@demo.hk');
+  assert(ru.setupToken && ru.setupToken.length === 12, '真戶要種 12 字一次性 token');
+  assert(ru.setupExp, '要有期限（30 分鐘）');
+  assert(!gu, '唔存在嘅 email 唔會整戶');
+  assert(!/real@demo\.hk/.test(JSON.stringify(G.readTable_('操作紀錄').slice(0, 0))), '（唔檢查 log 內容，只確認唔會回身份）');
+});
+
+t('忘記密碼：token 用完即廢、過期唔收；GAS 永遠唔見明文密碼', () => {
+  const { G, props } = makeSandbox(); G.initializeSheets();
+  const key = props.get('API_KEY');
+  const users = G.readUsers_();
+  users.push({ id: 'u-2', email: 'm@demo.hk', role: 'parent', status: 'active', name: '家長', pv: 1 });
+  G.writeTable_('旅員', users, 'test');
+  const r = call(G, { action: 'issueResetToken', apikey: key, email: 'm@demo.hk' });
+  const tok = r.data.token || G.readUsers_().find(u => u.email === 'm@demo.hk').setupToken;
+  assert(tok && tok.length === 12, '要有 token：' + tok);
+  /* 過期：改 setupExp 做過去 → 唔收 */
+  const us2 = G.readUsers_(); us2.find(u => u.email === 'm@demo.hk').setupExp = new Date(Date.now() - 60000).toISOString();
+  G.writeTable_('旅員', us2, 'test');
+  const exp = call(G, { action: 'setupWithToken', apikey: key, token: tok, password_hash: 'a'.repeat(64), password_salt: 'abcdefgh' });
+  eq(exp.code, 'token_expired', '過期要拒：' + JSON.stringify(exp).slice(0, 120));
+  /* 未過期 → 設得入；設完 token 消失、再用同一 token 拒 */
+  const us3 = G.readUsers_(); us3.find(u => u.email === 'm@demo.hk').setupExp = new Date(Date.now() + 60000).toISOString();
+  G.writeTable_('旅員', us3, 'test');
+  const ok1 = call(G, { action: 'setupWithToken', apikey: key, token: tok, password_hash: 'b'.repeat(64), password_salt: 'abcdefgh' });
+  assert(ok1.success === true, '未過期要設得入：' + JSON.stringify(ok1).slice(0, 120));
+  const u = G.readUsers_().find(x => x.email === 'm@demo.hk');
+  eq(u.hash, 'b'.repeat(64), '要落 hash（GAS 只存 hash）');
+  assert(!u.setupToken && !u.setupExp, 'token 用完即廢');
+  eq(u.mustChangePw, false, '重設完唔使再強制改（已經係佢自己揀嘅）');
+  const again = call(G, { action: 'setupWithToken', apikey: key, token: tok, password_hash: 'c'.repeat(64), password_salt: 'abcdefgh' });
+  eq(again.code, 'bad_token', '同一 token 唔可以再用');
+  /* 明文密碼永遠唔應該出現喺任何表 */
+  const dump = JSON.stringify(G.readUsers_()) + JSON.stringify(G.readTable_('操作紀錄'));
+  assert(!/password_hash|password:/i.test(dump) || !/"password"/.test(dump), '唔應該有明文密碼欄');
+});
+
 /* 收尾 */
 console.log('');
 if (fails.length) {

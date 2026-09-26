@@ -1644,6 +1644,54 @@ await test('★ 移交（BUILD §6）：同一套規矩（hash／冪等／撞號
   assert(document.querySelector('#tf-import'), '接收頁要有「匯入移交套裝」掣');
 });
 
+await test('★ 忘記密碼：登入頁有入口、設定密碼頁、示範零 fetch、唔會外洩有冇戶口', async () => {
+  globalThis.location.search = '';
+  A.logout();
+  main.boot();
+  assert(document.querySelector('#forgot'), '旅閘登入頁要有「唔記得密碼？」掣');
+  assert(document.querySelector('#rescue'), '求救掣要留返（入唔到嘅最後一路）');
+  /* 撳落去：示範模式唔會發請求，但要有真入口（modal） */
+  document.querySelector('#forgot').click();
+  const dlg = document.querySelector('.mask');
+  assert(dlg, '撳「唔記得密碼」要開對話框');
+  assert(/一次性連結/.test(dlg.textContent) && /唔會.*有冇戶口|防.*枚舉/.test(dlg.textContent), '要講清楚一次性連結 ＋ 防枚舉');
+  assert(dlg.querySelector('#fg-email'), '要輸入 email');
+  dlg.querySelector('#fg-email').value = 'parent@demo.troop';
+  dlg.querySelector('[data-go]').click();
+  await new Promise(r => setTimeout(r, 30));
+  assert(/示範模式/.test(dlg.textContent), '示範模式要老實講（唔會假裝寄咗）');
+  assert(/求救/.test(dlg.textContent), '要有求救 fallback');
+  document.querySelectorAll('.mask').forEach(m => m.remove());
+
+  /* 設定密碼頁（第一個旅長／重設連結共用）：真模式先會打 API */
+  globalThis.location.search = '?step=setup&t=ABCD1234EFGH&e=chief@demo.troop';
+  main.boot();
+  const t = text();
+  assert(/設定密碼/.test(t), 'setup 步驟要 render');
+  assert(document.querySelector('#st-token').value === 'ABCD1234EFGH', '連結帶嘅 token 要填好');
+  assert(document.querySelector('#st-email').value === 'chief@demo.troop', '連結帶嘅 email 要填好');
+  assert(/PBKDF2/.test(t), '要講明密碼由伺服器雜湊（GAS 唔見明文）');
+  document.querySelector('#st-pw').value = 'short';
+  document.querySelector('#st-go').click();
+  await new Promise(r => setTimeout(r, 20));
+  assert(/最少 8 字/.test(document.querySelector('#st-err')?.textContent || ''), '短密碼要即刻擋');
+  document.querySelector('#st-pw').value = 'newpass1234';
+  document.querySelector('#st-pw2').value = 'newpass1234';
+  document.querySelector('#st-go').click();
+  await new Promise(r => setTimeout(r, 30));
+  assert(/示範模式/.test(document.querySelector('#toasts')?.textContent || ''), '示範模式唔可以假裝真設密碼');
+  globalThis.location.search = '';
+
+  /* 後端合約：GAS 側同 /api 側都要有（唔可以只做前端） */
+  const gas = readFileSync(join(ROOT, 'apps-script/Code.gs'), 'utf8');
+  assert(/function issueResetToken/.test(gas) && /MailApp\.sendEmail/.test(gas), 'GAS 要負責種 token 同寄信');
+  assert(/setupExp/.test(gas) && /token_expired/.test(gas), '重設連結要有限期（過期唔收）');
+  assert(/no_user（唔會外洩邊個 email 有戶）/.test(gas), '搵唔到都要回同一個形狀（防枚舉）');
+  const api = readFileSync(join(ROOT, 'assets/js/lib/api.js'), 'utf8');
+  assert(/forgotPassword/.test(api) && /setupWithToken/.test(api), 'api.js 要有兩支（前端唔可以自己算 hash）');
+  assert(!/PBKDF2|pbkdf2/i.test(api) || !/hashPassword/.test(api), '前端唔可以自己 hash 密碼（PBKDF2 一定係 server 側）');
+});
+
 /* ---------- 互動掃描：撳晒所有掣，唔可以有例外 ---------- */
 const asyncErrors = [];
 process.on('unhandledRejection', e => asyncErrors.push(String(e && e.message ? e.message : e)));
