@@ -1,6 +1,7 @@
 /* 通告 — 發佈、分享、報名、公開頁、個人化訂閱 ★ */
 import { esc, icon, fmtDate, fmtDateFull, money, toast, copyText, qrSvg, downloadFile, toCSV, relTime } from '../lib/util.js';
 import * as S from '../lib/store.js';
+import { capability, subscribeDevice, pushConfig, PUSH_CONFIG } from '../lib/push.js';
 import * as API from '../lib/api.js';
 import { go } from '../lib/router.js';
 import { page, card, table, badge, notice, tabs, modal, kv, stat, toolbar, searchBox, selectBox, empty } from './ui.js';
@@ -164,6 +165,12 @@ function renderSubs(el, query) {
   const d = S.load();
   const sub = d.subscriptions;
   const TOPICS = ['訓練', '服務', '活動', '比賽', '未分類'];
+  const cap = capability();
+  /* 推送鏈狀態：示範模式＝唔會問 server（鐵律）；真模式先去問一次（唔會扮開通） */
+  const chain = (() => { try { return JSON.parse(sessionStorage.getItem('troop.pushChain') || 'null'); } catch { return null; } })();
+  const chainBadge = chain
+    ? (chain.enabled ? badge('已開通（交館方推送鏈）', 'g', true) : badge('未開通：' + esc(String(chain.note || '').slice(0, 60)), 'y', true))
+    : badge(S.isMock() ? '示範模式：唔會問後端' : '未知（撳「開啟推送」會先問）', 'n', true);
   const body = `
   ${notice('個人化訂閱係重中之重：<b>push 內建咗就唔使「拉落嚟」</b>，通告自動去到啱嘅人手上。設定存<b>本機</b>（LocalStorage），<b>唔經 server、冇 token 可偷</b>。', 'ok')}
   <div class="grid g2 mt-12">
@@ -180,8 +187,14 @@ function renderSubs(el, query) {
     <div class="flex-b" style="border:1px solid var(--line);border-radius:8px;padding:10px 12px">
       <div><div class="bold">${sub.pushEnabled ? '已開推送' : '未開推送'}</div>
         <div class="xs faint">${esc(sub.device)} · 上次推送 ${esc(sub.lastPush || '—')}</div></div>
-      <button class="btn sm ${sub.pushEnabled ? '' : 'primary'}" id="sub-toggle">${sub.pushEnabled ? '關閉推送（示範）' : '開啟推送'}</button>
+      <button class="btn sm ${sub.pushEnabled ? '' : 'primary'}" id="sub-toggle">${sub.pushEnabled ? '關閉推送' : '開啟推送（呢部裝置）'}</button>
     </div>
+    <div class="kv mt-12">
+      <dt>瀏覽器能力</dt><dd>${cap.ok ? badge('支援推送', 'g', true) : badge('唔支援（或者唔喺 https）', 'y', true)} · 通知權限 <span class="mono">${esc(cap.permission)}</span></dd>
+      <dt>推送鏈</dt><dd id="sub-chain">${chainBadge}</dd>
+      <dt>呢部裝置</dt><dd id="sub-device" class="xs">${esc(sub.device || '未訂閱')}</dd>
+    </div>
+    <div class="xs faint mt-8">${esc(cap.note)}</div>
     ${notice('推送基建<b>復用圖書館現有鏈</b>（每日 scrape → Supabase <span class="mono">push_subscriptions</span> → GitHub Actions 06:00 <span class="mono">notify.py</span> → pywebpush (VAPID)），系統<b>零另起爐灶</b>；7 日 rolling 補漏。館方數據完整保留：知幾多人訂、訂咩，<b>唔知邊個</b>。', 'info')}` })}
   ${card({ title: '分類參考（總會通告分類）', body: table({
     cls: 'tbl compact', head: ['支部', '分類', '最近推送'],
@@ -211,10 +224,49 @@ function renderSubs(el, query) {
     });
     toast('訂閱已更新（存本機）', 'ok');
   }));
-  el.querySelector('#sub-toggle')?.addEventListener('click', () => {
-    S.commit(dd => { dd.subscriptions.pushEnabled = !dd.subscriptions.pushEnabled; });
-    renderSubs(el, query);
-    toast('推送設定已更新（示範：唔會真係訂閱瀏覽器）', 'ok');
+  el.querySelector('#sub-toggle')?.addEventListener('click', async () => {
+    const on = !S.load().subscriptions.pushEnabled;
+    /* 關：交館方停止（真模式）；開：四步真訂閱（能力→設定→權限→訂閱） */
+    if (!on) {
+      if (S.isMock()) {
+        S.commit(dd => { dd.subscriptions.pushEnabled = false; dd.subscriptions.device = '示範：已關閉本機推送設定'; });
+        toast('示範模式：只關咗本機設定（唔會通知館方、唔會發請求）', 'warn', '', null, 6000);
+        return go('notices?tab=subs');
+      }
+      const { unsubscribe } = await import('../lib/push.js');
+      const r = await unsubscribe(S.load().subscriptions.endpoint || '');
+      S.commit(dd => { dd.subscriptions.pushEnabled = false; dd.subscriptions.device = '已關閉推送' + (r.ok ? '' : `（館方：${r.msg || r.code}）`); });
+      toast(r.ok ? '已關閉推送（已交館方停止）' : `本機已關，但館方未收到（${r.msg || r.code}）`, r.ok ? 'warn' : 'err', '', null, 6000);
+      return go('notices?tab=subs');
+    }
+    if (S.isMock()) {
+      S.commit(dd => { dd.subscriptions.pushEnabled = true; dd.subscriptions.device = '示範：已記錄訂閱意願（唔會真訂閱）'; });
+      toast('示範模式：只記低你嘅訂閱意願（唔會真訂閱、唔會發請求）', 'warn', '', null, 6000);
+      return go('notices?tab=subs');
+    }
+    /* 真模式：先問設定，再行四步 */
+    const cfg = await pushConfig();
+    try { sessionStorage.setItem('troop.pushChain', JSON.stringify(cfg.ok ? cfg.data : { enabled: false, note: cfg.msg })); } catch { /* 存唔到都唔緊要 */ }
+    if (!cfg.ok || !cfg.data?.enabled) {
+      toast(`推送鏈未開通：${cfg.data?.note || cfg.msg || cfg.code} —— 訂閱意願已存本機`, 'warn', '', null, 8000);
+      S.commit(dd => { dd.subscriptions.pushEnabled = true; dd.subscriptions.device = '未開通：只存本機意願'; });
+      return go('notices?tab=subs');
+    }
+    const r = await subscribeDevice({ topics: S.load().subscriptions.topics, unit: S.getSession()?.unit || '', branch: S.getSession()?.branchId || '' });
+    if (!r.ok) {
+      toast(`訂閱唔成功：${r.msg || r.code}`, 'err', '', null, 8000);
+      S.commit(dd => { dd.subscriptions.pushEnabled = false; dd.subscriptions.device = `訂閱失敗（${r.code}）`; });
+      return go('notices?tab=subs');
+    }
+    S.commit(dd => {
+      dd.subscriptions.pushEnabled = true;
+      dd.subscriptions.device = '已訂閱呢部裝置（館方鏈）';
+      dd.subscriptions.endpoint = r.data?.endpoint || dd.subscriptions.endpoint || '';
+      dd.subscriptions.lastPush = dd.subscriptions.lastPush || '—';
+    });
+    S.audit('訂閱推送（匿名）', PUSH_CONFIG.source, `題材 ${(S.load().subscriptions.topics || []).join('、')}｜只送 endpoint／keys／topics`);
+    toast('已訂閱 —— 之後有相關通告會由圖書館推送鏈通知你', 'ok', '', null, 6000);
+    go('notices?tab=subs');
   });
 }
 

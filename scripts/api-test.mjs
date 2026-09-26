@@ -21,6 +21,13 @@ const t = (name, fn) => {
 };
 
 const assert = (c, m) => { if (!c) throw new Error(m || 'assert failed'); };
+/* 呼叫 Vercel handler（假 req／res） */
+const callApi = async (mod, body, headers = {}) => {
+  let out = null;
+  const res = { statusCode: 0, setHeader() {}, end: t => { out = t; } };
+  await mod.default({ method: 'POST', url: '/api/x', headers, body }, res);
+  return { status: res.statusCode, body: JSON.parse(out || '{}') };
+};
 const eq = (a, b, m) => assert(a === b, `${m || 'eq'}（got ${JSON.stringify(a)}，want ${JSON.stringify(b)}）`);
 
 const auth = await import('../api/auth.js');
@@ -28,6 +35,7 @@ const superApi = await import('../api/super.js');
 const proxy = await import('../api/proxy.js');
 const downs = await import('../api/downstreams.js');
 const unitsApi = await import('../api/units.js');
+const pushApi = await import('../api/push.js');
 
 console.log('\n旅 /api 測試（本機；真 Vercel 上仍要人手試一次真登入）');
 
@@ -342,6 +350,75 @@ t('旅聚合：唔會回 URL／KEY（對下游只讀 registry）', async () => {
   assert(/_URL|_KEY/.test(src) === false, 'troop.js 唔應該接觸 DOWNSTREAM_*_URL／_KEY');
   const pulled = await troopApi.pullTables('99', { gas: async () => ({ ok: false, code: 'not_configured', msg: 'x' }) }, { tables: ['旅通告'], fresh: true });
   assert(pulled.ok === false && pulled.code === 'not_configured', '未設定 env 要誠實失敗');
+});
+
+/* ★ 個人化訂閱：/api/push（復用圖書館鏈、匿名白名單、未開通唔會扮成功） */
+t('訂閱：payload 白名單（剝走 PII）＋訂閱資料格式檢查', () => {
+  const dirty = {
+    endpoint: 'https://fcm.googleapis.com/fcm/send/abcDEF1234567890',
+    keys: { p256dh: 'B'.repeat(60), auth: 'a'.repeat(24) },
+    topics: ['circulars', 'notices', 'hack'],
+    scope: '82/sc0082',
+    /* ↓↓↓ 呢啲一律唔應該出現喺送去館方嘅 payload */
+    email: 'chief@demo.hk', name: '張偉業', ymis: 'YMIS-2001', phone: '9123 4567'
+  };
+  const clean = pushApi.sanitizeSubscription(dirty);
+  const flat = JSON.stringify(clean);
+  assert(!/chief@demo\.hk|張偉業|YMIS-2001|9123/.test(flat), '★ 白名單要剝走 email／姓名／YMIS／電話：' + flat);
+  eq(Object.keys(clean).sort().join(','), 'at,endpoint,keys,scope,source,topics,ua', '只可以剩白名單欄位（endpoint 必要；冇其他）');
+  eq(clean.topics.join(','), 'circulars,notices', '題材只收已知三種（hack 要剝）');
+  assert(pushApi.hasPii(dirty) === true && pushApi.hasPii(clean) === false, 'hasPii 要分得出');
+  eq(pushApi.validateSubscription(clean).ok, true, '正常訂閱要過格式檢查');
+  const bad = pushApi.validateSubscription({ endpoint: 'http://x', keys: { p256dh: 'short', auth: '' } });
+  assert(bad.ok === false && bad.missing.length === 3, '唔齊／唔 https 要列齊問題：' + JSON.stringify(bad));
+});
+
+t('訂閱：未設定 env ＝ 誠實講未開通（唔會扮成功、唔會自己存一份）', async () => {
+  const cfg = pushApi.pushConfig({});
+  eq(cfg.enabled, false, '冇 VAPID／收件位＝未開通');
+  assert(/未開通/.test(cfg.note) && /VAPID_PUBLIC_KEY/.test(cfg.note), '要講明缺咩：' + cfg.note);
+  const cfg2 = pushApi.pushConfig({ VAPID_PUBLIC_KEY: 'B'.repeat(80) });
+  eq(cfg2.enabled, false, '得公鑰都唔算開通（冇收件位）');
+  eq(cfg2.hasIngest, false, 'hasIngest 要老實');
+  const full = pushApi.pushConfig({ VAPID_PUBLIC_KEY: 'B'.repeat(80), PUSH_INGEST_URL: 'https://example.supabase.co/functions/v1/push' });
+  eq(full.enabled, true, '兩樣齊＝開通');
+  eq(full.vapidPublicKey.length, 80, '公鑰可以畀前端（公開）');
+  assert(!/supabase/.test(JSON.stringify(full)), '★ 館方收件位唔可以出喺 config 回應');
+  /* 真 handler：未設 env → not_configured，而且唔會寫任何嘢 */
+  const res = await callApi(pushApi, { action: 'subscribe', payload: { endpoint: 'https://fcm.googleapis.com/fcm/send/abcDEF1234567890', keys: { p256dh: 'B'.repeat(60), auth: 'a'.repeat(24) }, topics: ['circulars'] } });
+  eq(res.body.code, 'not_configured', '未開通要回 not_configured：' + JSON.stringify(res.body));
+  eq(res.body.localOnly, true, '要講明只存本機意願');
+  /* 限流：同一個 IP 打 11 次要 rate_limited */
+  let last = null;
+  for (let i = 0; i < 11; i++) last = await callApi(pushApi, { action: 'subscribe', payload: { endpoint: 'https://fcm.googleapis.com/fcm/send/abcDEF1234567890', keys: { p256dh: 'B'.repeat(60), auth: 'a'.repeat(24) } } }, { 'x-forwarded-for': '203.0.113.77' });
+  eq(last.body.code, 'rate_limited', '同一個 IP 打太多要限流：' + JSON.stringify(last.body).slice(0, 120));
+});
+
+t('訂閱：有收件位就轉去館方（帶 Bearer），館方掛咗要老實報', async () => {
+  const savedUrl = process.env.PUSH_INGEST_URL, savedKey = process.env.PUSH_INGEST_KEY, savedVapid = process.env.VAPID_PUBLIC_KEY, savedFetch = globalThis.fetch;
+  process.env.PUSH_INGEST_URL = 'https://library.example/functions/v1/push';
+  process.env.PUSH_INGEST_KEY = 'secret-key';
+  process.env.VAPID_PUBLIC_KEY = 'B'.repeat(80);
+  let seen = null;
+  globalThis.fetch = async (url, opts) => { seen = { url, opts }; return { ok: true, status: 200, text: async () => '{"ok":true}' }; };
+  try {
+    const res = await callApi(pushApi, { action: 'subscribe', payload: { endpoint: 'https://fcm.googleapis.com/fcm/send/abcDEF1234567890', keys: { p256dh: 'B'.repeat(60), auth: 'a'.repeat(24) }, topics: ['notices'] } });
+    eq(res.body.success, true, '轉發成功要回 success：' + JSON.stringify(res.body));
+    eq(res.body.data.stored, true, '要講明已交館方');
+    assert(seen && seen.url.includes('library.example'), '要打去館方收件位');
+    eq(seen.opts.headers.Authorization, 'Bearer secret-key', '要帶 Bearer（館方要驗）');
+    const sent = JSON.parse(seen.opts.body).subscription;
+    assert(sent && sent.endpoint && !/email|name|ymis/i.test(seen.opts.body), '轉發內容只可以係匿名訂閱');
+    /* 館方掛咗：唔可以當成功 */
+    globalThis.fetch = async () => { throw new Error('ETIMEDOUT'); };
+    const r2 = await callApi(pushApi, { action: 'subscribe', payload: { endpoint: 'https://fcm.googleapis.com/fcm/send/abcDEF1234567890', keys: { p256dh: 'B'.repeat(60), auth: 'a'.repeat(24) } } }, { 'x-forwarded-for': '198.51.100.9' });
+    assert(r2.body.success === false && ['ingest_unreachable', 'rate_limited'].includes(r2.body.code), '館方掛咗要老實報：' + JSON.stringify(r2.body).slice(0, 120));
+  } finally {
+    globalThis.fetch = savedFetch;
+    if (savedUrl === undefined) delete process.env.PUSH_INGEST_URL; else process.env.PUSH_INGEST_URL = savedUrl;
+    if (savedKey === undefined) delete process.env.PUSH_INGEST_KEY; else process.env.PUSH_INGEST_KEY = savedKey;
+    if (savedVapid === undefined) delete process.env.VAPID_PUBLIC_KEY; else process.env.VAPID_PUBLIC_KEY = savedVapid;
+  }
 });
 
 await chain;                               // 等所有測試（同步／async）真係跑完先報告

@@ -1565,6 +1565,63 @@ await test('★ 同步引擎：三色燈＋樂觀鎖＋merge3 逐格問（示範
   S.resetDemo();
 });
 
+await test('★ 個人化訂閱（推送鏈）：sw.js 齊、前端四步真訂閱、示範零 fetch、未開通唔扮成功', async () => {
+  const sw = readFileSync(join(ROOT, 'sw.js'), 'utf8');
+  assert(/addEventListener\('push'/.test(sw), 'sw.js 要收 push');
+  assert(/showNotification/.test(sw), 'sw.js 要顯示通知');
+  assert(/notificationclick/.test(sw) && /openWindow/.test(sw), '撳通知要開返 APP');
+  assert(/pushsubscriptionchange/.test(sw), '訂閱被換要通知頁面重新訂閱');
+  assert(!/addEventListener\('fetch'/.test(sw), '★ sw 唔應該攔 fetch（免得同 Vercel／app 打架）');
+  /* 前端：四步真訂閱 ＋ 匿名 payload */
+  const push = readFileSync(join(ROOT, 'assets/js/lib/push.js'), 'utf8');
+  assert(/export async function subscribeDevice/.test(push), '要有真訂閱（唔係得個掣）');
+  assert(/pushManager\.subscribe/.test(push) && /applicationServerKey/.test(push), '要真係 pushManager.subscribe（帶 VAPID 公鑰）');
+  assert(/requestPermission/.test(push), '要問通知權限');
+  assert(/not_configured/.test(push), '未開通要有專屬 code（唔扮成功）');
+  assert(/\/api\/push/.test(push), '前端只認同源 /api/push');
+  assert(!/supabase\.co|VAPID_PRIVATE|service_role/i.test(push), '★ 前端唔可以有任何館方 URL／私鑰');
+  /* UI：訂閱頁要有能力／鏈狀態／真掣 */
+  A.loginAs('u-chief');
+  main.boot();
+  fireHash(w, '#/notices?tab=subs');
+  await new Promise(r => setTimeout(r, 20));
+  const t = text();
+  assert(/推送裝置/.test(t), '訂閱頁要有推送裝置卡');
+  assert(/瀏覽器能力/.test(t), '要顯示瀏覽器能力（唔支援都要老實講）');
+  assert(/推送鏈/.test(t), '要顯示推送鏈狀態');
+  assert(document.querySelector('#sub-toggle'), '要有開啟推送掣');
+  /* 示範模式：撳落去零 fetch、老實講（先確保係未開狀態，撳落去＝開啟） */
+  S.commit(dd => { dd.subscriptions.pushEnabled = false; });
+  fireHash(w, '#/notices?tab=subs');
+  await new Promise(r => setTimeout(r, 20));
+  let fetches = 0;
+  const of = globalThis.fetch;
+  globalThis.fetch = (...a) => { fetches++; return of(...a); };
+  await document.querySelector('#sub-toggle').click();
+  await new Promise(r => setTimeout(r, 40));
+  globalThis.fetch = of;
+  eq(fetches, 0, '★ 示範模式撳開啟推送＝零 fetch');
+  const toastText = document.querySelector('#toasts')?.textContent || '';
+  assert(/示範模式/.test(toastText), '示範模式要老實講（唔會真訂閱）：' + JSON.stringify(toastText.slice(0, 120)));
+  assert(!/已交館方/.test(toastText), '★ 示範模式唔可以講「已交館方」（講大話）');
+  /* 後端：/api/push 存在，且收件位／私鑰只住 env */
+  const api = readFileSync(join(ROOT, 'api/push.js'), 'utf8');
+  assert(/PUSH_INGEST_URL/.test(api) && /VAPID_PUBLIC_KEY/.test(api), 'env 名稱要對得上（VAPID_PUBLIC_KEY／PUSH_INGEST_URL）');
+  assert(/sanitizeSubscription/.test(api) && /hasPii/.test(api), '要有白名單剝 PII');
+  assert(!/supabase\.co\/[a-z0-9]/i.test(api), '★ 唔可以寫死館方 URL');
+  /* 教材 13 ＋ 索引 */
+  const doc = readFileSync(join(ROOT, 'docs/教材/13-個人化訂閱與推送.md'), 'utf8');
+  assert(/VAPID_PUBLIC_KEY/.test(doc) && /PUSH_INGEST_URL/.test(doc), '教材 13 要列開通 env');
+  assert(/旅側永遠唔存訂閱表/.test(doc), '要講明旅側唔存訂閱表（責任線）');
+  const idx = readFileSync(join(ROOT, 'docs/教材/README.md'), 'utf8');
+  assert(/13-個人化訂閱與推送\.md/.test(idx), '教材索引要有 13');
+  /* CI 硬攔（BUILD §10 體積治理） */
+  const ci = readFileSync(join(ROOT, '.github/workflows/check.yml'), 'utf8');
+  assert(/npm run check|npm run smoke/.test(ci), 'CI 要跑 check／smoke');
+  assert(/超過 5MB 上限/.test(ci), '★ CI 要有部署體積硬攔（<5MB）');
+  S.resetDemo();
+});
+
 await test('★ db shard：真後端檢查掣（示範模式零 fetch／老實講）＋ GAS 源碼釘死三個保障', async () => {
   /* ① UI：後端分頁有「真後端檢查」掣 ＋ db shard 卡 */
   A.loginAs('u-chief');

@@ -69,6 +69,7 @@ export function boot() {
   startSilentRefresh(lost => toast(`要做一次重新登入：${lost?.msg || 'session 續唔到'}`, 'warn', '去登入', () => { logout(); renderGate(); }, 9000));
   renderShell();
   drainQueueWhenDue();                                 // 開機時：夠鐘就補送（離線改動唔會等人記得）
+  initPush();                                          // 真模式：註冊 sw（推送接收端；示範零 fetch）
   if (sessionStorage.getItem('troop.mustPw')) { sessionStorage.removeItem('troop.mustPw'); setTimeout(() => openChangePw(true), 250); }
 }
 
@@ -877,6 +878,20 @@ function openChangePw(must) {
       };
     }
   });
+}
+
+/* ★ 推送：service worker 只喺真模式註冊（示範模式零 fetch 鐵律）；
+   收到 sw 嘅訂閱變更通知就提示用戶重新訂閱一次（唔會靜靜死咗收唔到推送）。 */
+async function initPush() {
+  try {
+    if (S.isMock() || !('serviceWorker' in navigator)) return;
+    const { watchSubscriptionChanges } = await import('./lib/push.js');
+    await navigator.serviceWorker.register('./sw.js', { scope: './' });
+    watchSubscriptionChanges(window, () => {
+      toast('瀏覽器換咗推送訂閱 —— 撳「開啟推送」再確認一次就繼續收', 'warn', '去訂閱', () => go('notices?tab=subs'), 9000);
+      S.audit('推送訂閱變更', 'sw', '瀏覽器換咗訂閱 —— 提示用戶重新訂閱');
+    });
+  } catch { /* 唔支援都唔可以搞到 APP 爆 */ }
 }
 
 /* ---------------- 監聽 ---------------- */
