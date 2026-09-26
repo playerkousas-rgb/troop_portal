@@ -1692,6 +1692,52 @@ await test('★ 忘記密碼：登入頁有入口、設定密碼頁、示範零 
   assert(!/PBKDF2|pbkdf2/i.test(api) || !/hashPassword/.test(api), '前端唔可以自己 hash 密碼（PBKDF2 一定係 server 側）');
 });
 
+await test('★ 子女綁定：家長申請（真模式打 API）→ 領袖確認先見得到；demo 有兩張（含名冊對唔上）', async () => {
+  /* ① demo 資料：兩張待批（一張正常、一張名冊對唔上） */
+  A.logout(); globalThis.location.search = ''; main.boot();
+  const demoBinds = S.load().applications.filter(a => a.kind === 'bind');
+  assert(demoBinds.length >= 2, 'demo 要有待批綁定（正常 ＋ 名冊對唔上）');
+  assert(demoBinds.some(b => !b.title), '要有一張係名冊對唔上（示範唔會亂批）');
+
+  /* ② 領袖頁（待辦）：分頁有「子女綁定」＋要講明係領袖確認 */
+  A.loginAs('u-chief');
+  main.boot();
+  fireHash(w, '#/pending?kind=bind');
+  await new Promise(r => setTimeout(r, 20));
+  const t = text();
+  assert(/子女綁定/.test(t), '待辦要有子女綁定分類');
+  assert(/領袖確認|防亂認人仔/.test(t), '要講明係領袖確認（防亂認人仔）');
+  assert(/名冊對唔上/.test(t), '名冊對唔上要即刻睇得到（唔會亂批）');
+
+  /* ③ 家長頁：送出綁定（示範模式零 fetch，誠實） */
+  await new Promise(r => setTimeout(r, 10));
+  A.logout();
+  A.loginAs('u-parent');
+  main.boot();
+  fireHash(w, '#/children');
+  const before = S.load().applications.filter(a => a.kind === 'bind').length;
+  document.querySelector('#ch-ymis').value = 'ymis-2009';
+  await document.querySelector('#ch-add').click();
+  await new Promise(r => setTimeout(r, 40));
+  const after = S.load().applications.filter(a => a.kind === 'bind');
+  assert(after.length === before + 1, '要加一張待批綁定');
+  assert(after.some(a => a.ymis === 'YMIS-2009'), '申請要記住係綁邊個');
+  assert(/領袖確認/.test(document.querySelector('#toasts')?.textContent || ''), '示範模式都要講「要領袖確認」');
+
+  /* ④ 後端合約：GAS 兩個 action ＋ 白名單 ＋ api.js 兩支 */
+  const gas = readFileSync(join(ROOT, 'apps-script/Code.gs'), 'utf8');
+  assert(/function bindChild/.test(gas), 'GAS 要有 bindChild');
+  assert(/function decideBind/.test(gas), 'GAS 要有 decideBind（領袖確認）');
+  assert(/唔可以批自己／|| no_parent/.test(gas) || /no_parent/.test(gas), '冇家長戶唔可以批');
+  const proxy = readFileSync(join(ROOT, 'api/proxy.js'), 'utf8');
+  assert(/'bindChild'/.test(proxy) && /'decideBind'/.test(proxy), 'proxy 白名單兩邊都要有');
+  const api = readFileSync(join(ROOT, 'assets/js/lib/api.js'), 'utf8');
+  assert(/export async function bindChild/.test(api) && /export async function decideBind/.test(api), 'api.js 要包兩支');
+  /* 確認 = 領袖專屬（成員／家長唔可以自己批自己） */
+  const bindLines = proxy.split('\n').filter(l => l.includes("'decideBind'"));
+  assert(bindLines.some(l => /領袖/.test(l)), 'decideBind 要標明係領袖專屬（唔可以自己批自己）');
+});
+
 /* ---------- 互動掃描：撳晒所有掣，唔可以有例外 ---------- */
 const asyncErrors = [];
 process.on('unhandledRejection', e => asyncErrors.push(String(e && e.message ? e.message : e)));

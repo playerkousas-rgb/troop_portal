@@ -1,6 +1,7 @@
 /* 我的子女 — 家長專頁（子女跨支部自動併埋） */
 import { esc, icon, money, fmtDate, fmtDateFull, toast, promptDlg } from '../lib/util.js';
 import * as S from '../lib/store.js';
+import * as API from '../lib/api.js';
 import { go } from '../lib/router.js';
 import { page, card, table, badge, notice, stat, kv, progressBar, modal } from './ui.js';
 
@@ -14,7 +15,7 @@ export function render(el, params, query = {}) {
   <div class="grid g3 mt-12">
     ${stat({ k: '我嘅子女', v: kids.length, u: '位' })}
     ${stat({ k: '橫跨支部', v: new Set(kids.map(k => k.branchId)).size, u: '個' })}
-    ${stat({ k: '待確認綁定', v: d.applications.filter(a => a.kind === 'account' && a.state === 'pending').length, u: '項' })}
+    ${stat({ k: '待確認綁定', v: d.applications.filter(a => a.kind === 'bind' && a.state === 'pending').length, u: '項', tone: d.applications.some(a => a.kind === 'bind' && a.state === 'pending') ? 'warn' : 'ok' })}
   </div>
 
   ${kids.map(k => {
@@ -76,15 +77,26 @@ export function render(el, params, query = {}) {
       footer: `<button class="btn primary" onclick="this.closest('.mask').remove()">明白</button>`
     });
   }));
-  el.querySelector('#ch-add')?.addEventListener('click', () => {
+  el.querySelector('#ch-add')?.addEventListener('click', async () => {
     const ymis = el.querySelector('#ch-ymis').value.trim().toUpperCase();
     if (!ymis) return toast('請輸入子女編號', 'err');
+    const me = S.currentUser();
+    const email = me?.email || '';
+    /* 真模式：交旅 GAS 記待批（kind=bind）＋對名冊；示範模式：只記本機 */
+    let res = null;
+    if (API.isLive()) {
+      res = await API.bindChild({ ymis, email, note: `家長 ${me?.name || ''} 申請綁定 ${ymis}`, consent: true });
+      if (res.ok && res.data?.duplicate) { toast('已經申請過／已經綁咗 —— 唔會重複', 'warn'); return go('children'); }
+      if (!res.ok) return toast(`送唔到（${res.msg || res.code}）`, 'err', '', null, 6500);
+    }
     S.commit(dd => dd.applications.unshift({
-      id: 'a-' + Date.now(), kind: 'account', name: S.currentUser()?.name || '家長', email: S.currentUser()?.email || '',
-      ymis, note: `申請綁定子女 ${ymis}`, at: new Date().toISOString().slice(0, 16).replace('T', ' '),
+      id: res?.data?.id || ('a-' + Date.now()), kind: 'bind', name: me?.name || '家長', email,
+      ymis, branchId: res?.data?.branchId || '', title: res?.data?.childName || '',
+      note: `申請綁定子女 ${ymis}`, at: new Date().toISOString().slice(0, 16).replace('T', ' '),
       state: 'pending', need: '該團領袖確認子女'
     }));
-    S.audit('提交子女綁定申請', ymis, '待該團領袖確認');
-    toast('已送出 —— 該團領袖確認之後就見到', 'ok'); go('children');
+    S.audit('提交子女綁定申請', ymis, res?.ok ? '已送旅後端 · 待該團領袖確認' : '示範：只記本機');
+    toast(res?.ok ? `已送出 —— 等 ${S.branchName(res.data?.branchId || '')}領袖確認` : '已送出（示範）—— 該團領袖確認之後就見到', 'ok', '', null, 5500);
+    go('children');
   });
 }

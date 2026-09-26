@@ -92,7 +92,9 @@ var ACTIONS = ['status', 'dbInfo', 'load', 'loadTables', 'saveTables', 'saveTabl
   'noticeSignup', 'borrowApply', 'financeApply', 'progressApply', 'accountApply', 'decideApplication', 'setApplyMode', 'getApplyMode',
   'backupState', 'purgeLeftMembers', 'dataInventory', 'getVersion', 'issueResetToken',
   /* P4：移交與升降團（BUILD §6） */
-  'transferOut', 'importTransferBundle'];
+  'transferOut', 'importTransferBundle',
+  /* P6b：家長子女綁定（要該團領袖確認先睇到） */
+  'bindChild', 'decideBind'];
 
 /** 需要 apikey（＝server 側）嘅敏感 action */
 var SERVER_ONLY = ['authUser', 'dbInfo', 'exportAll', 'importAll', 'backupToDrive', 'purgeOldLogs', 'issueResetToken'];
@@ -1369,6 +1371,8 @@ function dispatch_(action, body, params) {
     case 'financeApply': return financeApply(body);
     case 'progressApply': return progressApply(body);
     case 'accountApply': return accountApply(body);
+    case 'bindChild': return bindChild(body);
+    case 'decideBind': return decideBind(body);
     case 'transferOut': return transferOut(body);
     case 'importTransferBundle': return importTransferBundle(body);
     case 'decideApplication': return decideApplication(body);
@@ -1545,6 +1549,87 @@ function readApplyMode_() {
   return r && r.value === 'invite-only' ? 'invite-only' : 'open';
 }
 /** 求救／問題回報**落旅 SHEET**（免登入都寫得：只可以 append，唔可以覆蓋其他人嘅單） */
+/* ========================= 家長子女綁定（BUILD §2 / §13 ③） =========================
+   規矩：家長**自己**申請（用自己 email）→ 該團領袖確認 → 先寫落 children。
+   為咩要確認：唔係嘅話任何人打個 YMIS 就睇到人哋個仔嘅資料。
+   綁定用**全球 SCOUT_ID**（YMIS），所以升團／轉支部零改動。
+   ================================================================================== */
+function bindChild(o) {
+  var ymis = sanitizeLabel_(String(o.ymis || '').trim().toUpperCase());
+  if (!ymis) return err_('bad_ymis', '要子女 YMIS／SCOUT_ID');
+  var email = String(o.email || '').toLowerCase();
+  if (!email) return err_('bad_email', '要家長 email（要用你自己個戶口）');
+  var users = readUsers_();
+  var parent = users.filter(function (u) {
+    return String(u.email || '').toLowerCase() === email && String(u.role || '') === 'parent';
+  })[0];
+  if (!parent) return err_('no_parent', '搵唔到呢個家長戶 —— 要用你自己登入嘅 email');
+  var kids = (parent.children || parent.childrenIds || []).map(String);
+  if (kids.indexOf(ymis) >= 0) return ok_({ duplicate: true, note: '呢個子女已經綁咗（唔使再申請）' });
+  /* 對名冊：唔可以綁一個唔存在嘅編號（防亂輸入） */
+  var child = users.filter(function (u) { return String(u.ymis || '').trim().toUpperCase() === ymis; })[0];
+  if (!child) return err_('no_child', '名冊搵唔到呢個編號 —— 請確認 YMIS（或者等該團先加入名冊）');
+  if (String(child.role || '') === 'super') return err_('no_child', '（呢個編號唔可以綁）');
+  var rows = readTable_('申請');
+  var dup = rows.filter(function (r) {
+    return String(r.kind) === 'bind' && String(r.ymis) === ymis
+      && String(r.email || '').toLowerCase() === email && String(r.state || 'pending') === 'pending';
+  })[0];
+  if (dup) return ok_({ duplicate: true, id: dup.id, note: '同一個綁定已經待批（唔會重複）' });
+  var rec = {
+    id: uid_('ap'), kind: 'bind', at: stamp_(),
+    name: String(parent.name || '').slice(0, 60), email: email, ymis: ymis,
+    branchId: sanitizeLabel_(child.branchId || ''), title: String(child.name || '').slice(0, 60),
+    note: String(o.note || '').slice(0, 200), consent: !!o.consent,
+    state: 'pending', via: CTX.mode === 'server' ? 'api' : 'ui', ip: String(CTX.ip || '').slice(0, 40),
+    dedupe: ymis + '|' + email, decidedBy: '', decidedAt: '', reason: ''
+  };
+  rows.push(rec);
+  var w = writeTable_('申請', rows, rec.name || 'parent');
+  if (!w.ok) return err_('write_fail', w.msg);
+  audit_(actor_(), '家長申請綁定子女', ymis, '家長 ' + email + '｜待該團領袖確認', 'parent');
+  return ok_({ saved: true, id: rec.id, state: 'pending', childName: child.name, branchId: child.branchId, note: '要該團領袖確認先睇到' });
+}
+function decideBind(o) {
+  var rows = readTable_('申請');
+  var i = rows.map(function (r) { return String(r.id); }).indexOf(String(o.id));
+  if (i < 0) return err_('no_app', '搵唔到呢張申請');
+  if (String(rows[i].kind) !== 'bind') return err_('bad_kind', '呢張唔係子女綁定申請');
+  if (String(rows[i].state || 'pending') !== 'pending') return err_('decided', '呢張已經處理過（唔會改第二次）');
+  var decide = String(o.decide || '');
+  var at = stamp_();
+  if (decide === 'reject') {
+    if (!String(o.reason || '').trim()) return err_('need_reason', '拒絕一定要寫原因（會通知家長）');
+    rows[i].state = 'rejected'; rows[i].reason = String(o.reason).slice(0, 200);
+    rows[i].decidedBy = actor_(); rows[i].decidedAt = at;
+    var w = writeTable_('申請', rows, actor_());
+    if (!w.ok) return err_('write_fail', w.msg);
+    audit_(actor_(), '拒絕子女綁定', rows[i].ymis, String(o.reason).slice(0, 80), 'leader');
+    return ok_({ decided: 'rejected', id: rows[i].id });
+  }
+  if (decide !== 'approve') return err_('bad_decide', 'decide 只可以 approve／reject');
+  /* 批：寫落家長戶嘅 children（**唔會**動子女自己嗰個戶） */
+  var users = readUsers_();
+  var pIdx = -1;
+  users.forEach(function (u, k) {
+    if (pIdx < 0 && String(u.email || '').toLowerCase() === String(rows[i].email || '').toLowerCase()
+      && String(u.role || '') === 'parent') pIdx = k;
+  });
+  if (pIdx < 0) return err_('no_parent', '家長戶唔見咗（可能被停用）—— 唔會批');
+  var kids = (users[pIdx].children || []).slice();
+  if (kids.map(String).indexOf(String(rows[i].ymis)) < 0) kids.push(String(rows[i].ymis));
+  users[pIdx].children = kids;
+  var w2 = writeTable_('旅員', users, actor_());
+  if (!w2.ok) return err_('write_fail', w2.msg);
+  rows[i].state = 'approved'; rows[i].reason = '';
+  rows[i].decidedBy = actor_(); rows[i].decidedAt = at;
+  rows[i].note = '已綁定（children 已加 ' + rows[i].ymis + '）';
+  var w3 = writeTable_('申請', rows, actor_());
+  if (!w3.ok) return err_('write_fail', w3.msg);
+  audit_(actor_(), '確認子女綁定', rows[i].ymis, '家長 ' + rows[i].email + '（children 已加）', 'leader');
+  return ok_({ decided: 'approved', id: rows[i].id, parent: rows[i].email, children: kids.length });
+}
+
 /* ============================ 移交與升降團（BUILD §6） ============================
    同一套流程行晒：跨支部／轉旅／調區／海轉空。
      ① 移出（transferOut）：來源團記 TRANSFERRED_OUT（tombstone）＋ transferTo／transferDate，

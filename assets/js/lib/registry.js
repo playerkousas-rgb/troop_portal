@@ -56,6 +56,7 @@ export const MODULES = [
       { id: 'pending-finance', label: '財務提交' },
       { id: 'pending-publish', label: '公開上報' },
       { id: 'pending-transfer', label: '移交接收' },
+      { id: 'pending-bind', label: '子女綁定' },
       { id: 'pending-rescue', label: '🆘 求救' }
     ]
   },

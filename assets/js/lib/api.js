@@ -130,6 +130,15 @@ export async function importTransferBundle(payload) {
   const g = guard(); if (g) return g;
   return jfetch('/api/proxy', { action: 'importTransferBundle', unit: unitId(), payload });
 }
+/* ------------------------- P6b：家長子女綁定（要該團領袖確認） ------------------------- */
+export async function bindChild(payload) {
+  const g = guard(); if (g) return g;
+  return jfetch('/api/proxy', { action: 'bindChild', unit: unitId(), payload });
+}
+export async function decideBind(payload) {
+  const g = guard(); if (g) return g;
+  return jfetch('/api/proxy', { action: 'decideBind', unit: unitId(), payload });
+}
 export async function gasAction(action, payload = {}) {
   const g = guard(); if (g) return g;
   return jfetch('/api/proxy', { action, unit: unitId(), payload });

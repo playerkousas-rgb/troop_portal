@@ -33,7 +33,9 @@ export const GAS_WHITELIST = [
   /* P2：批核（開戶申請／申報）＋申請模式 */
   'decideApplication', 'setApplyMode', 'getApplyMode',
   /* P4：移交與升降團（BUILD §6） */
-  'transferOut', 'importTransferBundle'
+  'transferOut', 'importTransferBundle',
+  /* P6b：家長子女綁定（家長自己申請；確認＝領袖） */
+  'bindChild', 'decideBind'
   /* 匿名可寫面（noticeSignup／borrowApply／financeApply／progressApply／accountApply／saveRescue）
      ＝下面 ANON_GAS，唔喺呢張表都入得閘（免得兩處名單走樣） */
 ];
@@ -48,7 +50,8 @@ export const CHIEF_ONLY = [
 /** 旅長 ＋ 教練員（coach）都可以用 */
 export const LEADER_ACTIONS = ['testDownstream', 'openAccountForDownstream', 'importUsers', 'updateUserProfile', 'updateUserRole', 'updatePermissions',
   'decideApplication',    // 批核：旅長／教練員都做得（拒一定要有原因）
-  'transferOut', 'importTransferBundle'];   // 移交：旅長／教練員都做得（移出／接收都係團務日常）
+  'transferOut', 'importTransferBundle',   // 移交：旅長／教練員都做得（移出／接收都係團務日常）
+  'decideBind'];                          // 子女綁定確認：領袖先做得（唔可以自己批自己）
 /** 唔使 session 都讀得（只係健康／公開讀） */
 const PUBLIC_GAS = ['status'];
 /** 免登入寫得（＝GAS 匿名可寫面；限流 GAS 做，呢度再加一層）

@@ -815,6 +815,54 @@ t('忘記密碼：token 用完即廢、過期唔收；GAS 永遠唔見明文密�
   assert(!/password_hash|password:/i.test(dump) || !/"password"/.test(dump), '唔應該有明文密碼欄');
 });
 
+/* ㉑ 子女綁定：家長申請 → 該團領袖確認先睇到；唔可以自己批自己、唔會批唔存在嘅編號 */
+t('子女綁定：要領袖確認先寫落 children；名冊對唔上／自己批自己一律唔過', () => {
+  const { G, props } = makeSandbox(); G.initializeSheets();
+  const key = props.get('API_KEY');
+  const users = G.readUsers_();
+  users.push({ id: 'u-p1', email: 'dad@demo.hk', role: 'parent', status: 'active', name: '陳大文', pv: 1 });
+  users.push({ id: 'u-k1', email: '', ymis: 'YMIS-2001', role: 'member', status: 'active', name: '陳小明', branchId: 'sc0082', pv: 1 });
+  G.writeTable_('旅員', users, 'test');
+
+  /* ① 唔存在嘅編號：唔准綁（名冊冇就係冇） */
+  const bad = call(G, { action: 'bindChild', apikey: key, email: 'dad@demo.hk', ymis: 'YMIS-9999' });
+  assert(bad.success === false && bad.code === 'no_child', '名冊對唔上要拒：' + JSON.stringify(bad).slice(0, 120));
+  /* ② 唔係家長戶：唔准綁 */
+  const notParent = call(G, { action: 'bindChild', apikey: key, email: 'nobody@demo.hk', ymis: 'YMIS-2001' });
+  assert(notParent.success === false && notParent.code === 'no_parent', '冇家長戶要拒');
+  /* ③ 正常申請：入待批，**未**寫 children */
+  const okApply = call(G, { action: 'bindChild', apikey: key, email: 'DAD@demo.hk', ymis: 'ymis-2001', consent: true });
+  assert(okApply.success === true && okApply.data.state === 'pending', '要入待批：' + JSON.stringify(okApply).slice(0, 140));
+  eq(okApply.data.childName, '陳小明', '要對到名冊個名');
+  const apId = okApply.data.id;
+  const pAfterApply = G.readUsers_().find(u => u.email === 'dad@demo.hk');
+  const kidsAfterApply = pAfterApply.children || pAfterApply.childrenIds || [];
+  eq(kidsAfterApply.length, 0, '★ 未確認之前唔可以見到子女');
+  /* ④ 重複申請：唔會整多張 */
+  const dup = call(G, { action: 'bindChild', apikey: key, email: 'dad@demo.hk', ymis: 'YMIS-2001' });
+  assert(dup.success === true && dup.data.duplicate === true, '重複申請要擋（duplicate）');
+
+  /* ⑤ 拒絕一定要原因 */
+  const rejNo = call(G, { action: 'decideBind', apikey: key, id: apId, decide: 'reject' });
+  assert(rejNo.success === false && rejNo.code === 'need_reason', '拒絕冇原因要拒');
+  /* ⑥ 唔存在／唔係綁定嘅申請 */
+  const noApp = call(G, { action: 'decideBind', apikey: key, id: 'ap-nope', decide: 'approve' });
+  assert(noApp.success === false && noApp.code === 'no_app', '冇呢張申請要拒');
+
+  /* ⑦ 領袖確認 → children 先出現 */
+  const appro = call(G, { action: 'decideBind', apikey: key, id: apId, decide: 'approve' });
+  assert(appro.success === true && appro.data.decided === 'approved', '確認要成功：' + JSON.stringify(appro).slice(0, 140));
+  const pFinal = G.readUsers_().find(u => u.email === 'dad@demo.hk');
+  eq((pFinal.children || []).map(String).join(','), 'YMIS-2001', '★ 確認之後先寫落 children');
+  /* ⑧ 處理過嘅唔可以再批一次（防重放） */
+  const again = call(G, { action: 'decideBind', apikey: key, id: apId, decide: 'approve' });
+  assert(again.success === false && again.code === 'decided', '同一張唔可以決定兩次');
+  /* ⑨ 個仔自己嗰個戶冇被動過（小朋友唔會因家長綁定而變咗） */
+  const kidRow = G.readUsers_().find(u => u.ymis === 'YMIS-2001');
+  eq(kidRow.name, '陳小明', '子女戶唔應該被改');
+  eq(kidRow.role, 'member', '子女戶角色唔變');
+});
+
 /* 收尾 */
 console.log('');
 if (fails.length) {

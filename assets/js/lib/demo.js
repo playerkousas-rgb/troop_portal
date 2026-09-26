@@ -301,7 +301,11 @@ export const DEMO_APPLICATIONS = [
   { id: 'a-2', kind: 'helper', name: '李美儀', email: 'coach@demo.troop', fromBranch: 'cs0082', toBranch: 'gs0082', note: '教練員想兼幫小童軍團（旅層教練員加支部授權 → 目標團批）', at: D(-2) + ' 15:00', state: 'pending', need: '目標團（小童軍團）團長批' },
   { id: 'a-3', kind: 'member', name: '阮小明', ymis: 'YMIS-2099', branchId: 'sc0082', note: '自行申請開戶（成員）', at: D(-3) + ' 09:20', state: 'pending', need: '該團團長對名冊核對' },
   { id: 'a-4', kind: 'account', name: '郭嘉敏', email: '', ymis: 'YMIS-2006', note: '深資童軍執委申請開戶', at: D(-6) + ' 20:10', state: 'approved', need: '', decidedBy: '張偉業', decidedAt: D(-5) + ' 10:00' },
-  { id: 'a-5', kind: 'publish', name: '童軍團', branchId: 'sc0082', note: '上報公開項目「小隊露營相簿」俾旅公開頁', at: D(-1) + ' 11:00', state: 'pending', need: '旅長批准對外發佈' }
+  { id: 'a-5', kind: 'publish', name: '童軍團', branchId: 'sc0082', note: '上報公開項目「小隊露營相簿」俾旅公開頁', at: D(-1) + ' 11:00', state: 'pending', need: '旅長批准對外發佈' },
+  /* ★ 子女綁定（kind=bind）：家長自己申請 → 該團領袖確認先睇到（防亂認人仔） */
+  { id: 'a-6', kind: 'bind', name: '陳小萍', email: 'parent@demo.troop', ymis: 'YMIS-2008', branchId: 'sc0082', title: '鄧小鳳', note: '申請綁定子女 YMIS-2008（童軍團・隊長）', at: D(-1) + ' 21:05', state: 'pending', need: '該團領袖確認（防亂認人仔）' },
+  /* 名冊對唔上：確認唔到（要領袖人手查），一齊示範「唔會亂批」 */
+  { id: 'a-7', kind: 'bind', name: '何太', email: 'ho@demo.troop', ymis: 'YMIS-9999', branchId: '', title: '', note: '申請綁定子女 YMIS-9999', at: D(0) + ' 08:40', state: 'pending', need: '該團領袖確認（⚠️ 名冊對唔上）' }
 ];
 
 /** 🆘 求救單（免登入送得；ADMIN 喺旅系統處理） */

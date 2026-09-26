@@ -2,6 +2,7 @@
 import { esc, icon, fmtDate, toast, promptDlg, confirmDlg } from '../lib/util.js';
 import { rescueKindMeta } from '../lib/registry.js';
 import * as S from '../lib/store.js';
+import * as API from '../lib/api.js';
 import { go } from '../lib/router.js';
 import { page, card, table, badge, notice, tabs, stat } from './ui.js';
 
@@ -13,6 +14,7 @@ const KINDS = [
   { id: 'publish', label: '公開上報' },
   { id: 'finance', label: '財務提交' },
   { id: 'transfer', label: '移交接收' },
+  { id: 'bind', label: '子女綁定' },
   { id: 'rescue', label: '🆘 求救' }
 ];
 
@@ -29,6 +31,12 @@ export function render(el, params, query = {}) {
   d.financeSubmits.filter(f => f.state === 'missing').forEach(f => items.push({
     kind: 'finance', at: '—', name: S.branchName(f.branchId), sub: `本月未提交財務摘要（截止每月 ${d.settings.financeDueDay} 號）`,
     need: '追提交', state: 'missing', id: f.id, src: 'finance'
+  }));
+  /* 家長子女綁定（kind=bind）：一定要該團領袖確認先睇到 —— 唔會自己批自己 */
+  d.applications.filter(a => a.kind === 'bind').forEach(a => items.push({
+    kind: 'bind', at: a.at, name: `${a.name}（家長）`,
+    sub: `申請綁定子女 <b>${esc(a.ymis)}</b>${a.title ? `（名冊：${esc(a.title)}）` : '（⚠️ 名冊對唔上）'}${a.branchId ? ` · ${esc(S.branchName(a.branchId))}` : ''}`,
+    need: '該團領袖確認（防亂認人仔）', state: a.state, id: a.id, src: 'applications'
   }));
   d.transfers.filter(t => t.state === 'pending').forEach(t => items.push({
     kind: 'transfer', at: t.at, name: `${t.name}（${t.scoutId}）`, sub: `${S.branchName(t.from)} → ${S.branchName(t.to)} · ${t.reason}`,
@@ -53,7 +61,7 @@ export function render(el, params, query = {}) {
   ${notice('每人只做自己嗰格：<b>成員戶、名冊、通告</b>屬支部；<b>領袖／家長戶、跨團權限、公開上報、財務確認</b>屬旅層。跨團幫手一定要<b>目標團批</b>，唔可以由旅長繞過。', 'info')}
   <div class="grid g4 mt-12">
     ${stat({ k: '等你處理', v: pending.length, u: '項', tone: pending.length ? 'warn' : 'ok' })}
-    ${stat({ k: '開戶／成員申請', v: counts('account') + counts('member'), u: '項' })}
+    ${stat({ k: '開戶／成員申請', v: counts('account') + counts('member'), u: '項', hint: `子女綁定 ${counts('bind')} 項` })}
     ${stat({ k: '財務待跟', v: counts('finance'), u: '項' })}
     ${stat({ k: '跨團／移交', v: counts('helper') + counts('transfer'), u: '項' })}
     ${stat({ k: '🆘 求救', v: counts('rescue'), u: '單', tone: counts('rescue') ? 'warn' : 'ok', hint: '免登入送得；要人手核實身份先做' })}
@@ -132,8 +140,12 @@ async function act(what, id, src) {
   const label = app?.name || (fin ? S.branchName(fin.branchId) : id);
 
   if (what === 'reject') {
-    const reason = await promptDlg({ title: `拒絕 · ${label}`, label: '原因（會通知申請人）', placeholder: '例：名冊對唔上／重複申請' });
+    const reason = await promptDlg({ title: `拒絕 · ${label}`, label: '原因（會通知申請人）', placeholder: app?.kind === 'bind' ? '例：名冊冇呢個編號／請用監護人 email' : '例：名冊對唔上／重複申請' });
     if (!reason) return;
+    if (app && app.kind === 'bind' && API.isLive()) {
+      const r = await API.decideBind({ id, decide: 'reject', reason });
+      if (!r.ok) return toast(`拒唔到（${r.msg || r.code}）`, 'err', '', null, 6000);
+    }
     if (app) S.commit(x => { const a = x.applications.find(y => y.id === id); if (a) { a.state = 'rejected'; a.decidedBy = S.currentUser()?.name; a.decidedAt = new Date().toISOString().slice(0, 10); a.reason = reason; } });
     if (fin) S.commit(x => { const f = x.financeSubmits.find(y => y.id === id); if (f) { f.state = 'query'; f.query = reason; } });
     S.audit('拒絕申請', label, reason);
@@ -149,6 +161,24 @@ async function act(what, id, src) {
     return;
   }
   // 批准
+  if (app && app.kind === 'bind') {
+    /* 子女綁定：確認＝寫落家長戶嘅 children（真模式由 GAS 寫；示範模式本機寫） */
+    let res = null;
+    if (API.isLive()) {
+      res = await API.decideBind({ id, decide: 'approve' });
+      if (!res.ok) return toast(`確認唔到（${res.msg || res.code}）`, 'err', '', null, 6000);
+    }
+    S.commit(x => {
+      const a = x.applications.find(y => y.id === id);
+      if (a) { a.state = 'approved'; a.decidedBy = S.currentUser()?.name; a.decidedAt = new Date().toISOString().slice(0, 10); a.note = `已綁定（children 已加 ${a.ymis}）`; }
+      const p = x.users.find(y => String(y.email || '').toLowerCase() === String(app.email || '').toLowerCase() && y.role === 'parent');
+      if (p) { p.children = Array.from(new Set([...(p.children || []), app.ymis])); }
+    });
+    S.audit('確認子女綁定', `${app.ymis}`, `家長 ${app.email}${res?.ok ? '（真模式：已寫旅 SHEET）' : '（示範）'}`);
+    toast(`已確認：${app.name} 而家睇得到子女 ${app.ymis}${res?.ok ? '' : '（示範）'}`, 'ok', '', null, 5500);
+    go('pending?kind=bind');
+    return;
+  }
   if (app) {
     S.commit(x => {
       const a = x.applications.find(y => y.id === id);
