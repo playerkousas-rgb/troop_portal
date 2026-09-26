@@ -22,9 +22,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      # ★ Node 22：jsdom 30 嘅 engines 係 ^22.22.2（Node 20 會喺 undici 直接 TypeError，
+      #   成個 smoke 跑唔到）。改版本要同步 package.json engines；smoke 有測試釘死兩邊一致。
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
       - name: 安裝測試依賴（jsdom；正式 api 零依賴）
         run: npm install --no-audit --no-fund
       - name: lint ＋ 體積治理

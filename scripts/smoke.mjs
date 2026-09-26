@@ -1668,6 +1668,19 @@ await test('★ 個人化訂閱（推送鏈）：sw.js 齊、前端四步真訂�
   const ci = readFileSync(join(ROOT, '.github/workflows/check.yml'), 'utf8');
   assert(/npm run check|npm run smoke/.test(ci), 'CI 要跑 check／smoke');
   assert(/超過 5MB 上限/.test(ci), '★ CI 要有部署體積硬攔（<5MB）');
+  /* ★ CI 嘅 Node 版本要同 package.json engines 對得上（唔可以又係 20 打 22 嘅嘢）：
+     jsdom 30 嘅 engines 係 ^22.22.2 —— 之前 CI 用 node 20，直接喺 undici 爆 TypeError，
+     smoke 一步都跑唔到（lint／gas／api 全綠都會照紅燈）。 */
+  const eng = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).engines.node;
+  const envMajor = Number((ci.match(/node-version:\s*'(\d+)/) || [])[1]);
+  const engMajor = Number((eng.match(/(\d+)/) || [])[1]);
+  assert(Number.isFinite(envMajor), 'CI 要寫明 node-version');
+  assert(engMajor >= 22, 'engines 要 ≥22（jsdom 30 要 ^22.22.2）：' + eng);
+  assert(envMajor >= engMajor, `★ CI node-version（${envMajor}）唔可以低過 engines（${eng}）`);
+  const jsdomEng = JSON.parse(readFileSync(join(ROOT, 'node_modules/jsdom/package.json'), 'utf8')).engines.node;
+  const [jmaj, jmin] = (jsdomEng.match(/\d+\.\d+/) || ['0.0'])[0].split('.').map(Number);
+  const [rmaj, rmin] = process.versions.node.split('.').map(Number);
+  assert(rmaj > jmaj || (rmaj === jmaj && rmin >= jmin), `本機 node（${process.versions.node}）唔可以舊過 jsdom 要求（${jsdomEng}）`);
   S.resetDemo();
 });
 

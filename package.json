@@ -5,7 +5,7 @@
   "description": "旅系統（生態系統嘅頂點）— 純靜態零依賴；UI 先行示範版（示範旅 MOCK 數據）",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "dev": "node dev-server.mjs",
