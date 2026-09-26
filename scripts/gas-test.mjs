@@ -15,6 +15,8 @@ import vm from 'node:vm';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = readFileSync(join(ROOT, 'apps-script/Code.gs'), 'utf8');
+/* 下游（團側）範本 —— 要喺同一個假環境度驗（BUILD §10 條 7：leaf 自製 session token） */
+const DS_SRC = readFileSync(join(ROOT, 'apps-script/Downstream.gs'), 'utf8');
 
 let pass = 0; const fails = [];
 const t = (name, fn) => { try { fn(); pass++; console.log('  ✓ ' + name); } catch (e) { fails.push({ name, e }); console.log('  ✗ ' + name + '\n      ' + e.message); } };
@@ -54,7 +56,7 @@ class FakeSpreadsheet {
   deleteSheet(sh) { this.sheets.delete(sh.getName()); }
 }
 const b64 = buf => Buffer.from(buf).toString('base64');
-function makeSandbox({ fetchImpl } = {}) {
+function makeSandbox({ fetchImpl, downstream = false } = {}) {
   const spread = new FakeSpreadsheet();
   const props = new Map();
   const cache = new Map();
@@ -72,6 +74,9 @@ function makeSandbox({ fetchImpl } = {}) {
       getUuid: () => randomUUID(),
       newBlob: (data, type, name) => ({ data, type, name }),
       base64Encode: s => b64(s),
+      base64EncodeWebSafe: s => Buffer.from(String(s), 'utf8').toString('base64url'),
+      base64Decode: s => Array.from(Buffer.from(String(s).replace(/-/g, '+').replace(/_/g, '/'), 'base64')),
+      newBlob: (data, type, name) => ({ data, type, name, getDataAsString: () => Buffer.from(Array.isArray(data) ? data : String(data), Array.isArray(data) ? undefined : 'utf8').toString('utf8') }),
       formatDate: () => '2026-01-01'
     },
     UrlFetchApp: {
@@ -109,7 +114,8 @@ function makeSandbox({ fetchImpl } = {}) {
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  vm.runInContext(SRC, sandbox, { filename: 'Code.gs' });
+  if (downstream) vm.runInContext(DS_SRC, sandbox, { filename: 'Downstream.gs' });
+  else vm.runInContext(SRC, sandbox, { filename: 'Code.gs' });
   return { G: sandbox, props, cache, requests, spread };
 }
 
@@ -983,6 +989,130 @@ t('讀取樂觀化：讀取唔等鎖、pointer 覆查、唔穩定會誠實講（
   eq(locked.length, 0, '★ 讀取唔應該攞全域寫鎖（呢個就係「讀取樂觀化」）');
   call(G2, { action: 'saveTables', apikey: G2.apiKey_(), data: { 支部: [] }, baseVersion: G2.readVersion_() });
   eq(locked.length, 1, '寫入一定要照舊攞鎖');
+});
+
+/* ㉕ 下游（團側）範本：sig 驗簽／閂口／leaf 自製 session token（P12） */
+t('下游範本：上游 sig 驗簽（雙通道／時窗／重放）＋白名單＋永不接受清單', () => {
+  const { G, props } = makeSandbox({ downstream: true });
+  props.set('API_KEY', 'downstream-key-123456');
+  const key = props.get('API_KEY');
+  const post = (body, params = {}) => {
+    const raw = JSON.stringify(body);
+    return G.linkHandlePost({ postData: { contents: raw }, parameter: params });
+  };
+  /* ① 冇簽名、本地入口開（未設定）→ 交返你自己處理（null） */
+  eq(post({ action: 'login', email: 'a@b.hk' }), null, '本地入口開：應該交返原本邏輯');
+  /* ② 正式簽名 → 通 */
+  const mk = (action, extra = {}) => {
+    const body = { action, ...extra };
+    const raw = JSON.stringify(body);
+    return { body: { ...body, ...G.makeLinkSig(action, raw, key) }, raw };
+  };
+  const one = mk('getLinkState');
+  const r1 = post(one.body);
+  assert(r1 && JSON.parse(r1.getContent()).success === true, '正確簽名要通：' + (r1 && r1.getContent()));
+  /* ③ 重放（同一張）→ 拒；連 cache 清咗都要拒（持久環） */
+  const again = post(one.body);
+  const againObj = JSON.parse(again.getContent());
+  assert(againObj.success === false && againObj.code === 'sig_replayed', '重放要拒（穩定 code）：' + again.getContent());
+  /* ④ 改 body 但用返原簽名 → 拒 */
+  const tamper = mk('getLinkState');
+  tamper.body.sub = 'hacker';
+  assert(JSON.parse(post(tamper.body).getContent()).success === false, '改咗 body 都通得（digest 冇綁 body）');
+  /* ⑤ 過期 → 拒 */
+  const old = mk('getLinkState');
+  old.body.sig_ts = String(Date.now() - 6 * 60 * 1000);
+  assert(/時間戳/.test(JSON.parse(post(old.body).getContent()).error || ''), '過期要拒');
+  /* ⑥ 永不接受：login／apply／改密碼 就算有合法簽名都唔收 */
+  ['login', 'apply', 'changePassword', 'logout'].forEach(a => {
+    const m = mk(a);
+    const o = JSON.parse(post(m.body).getContent());
+    assert(o.success === false && o.code === 'never_accept', a + ' 竟然收咗上游簽名（大問題）：' + JSON.stringify(o));
+  });
+  /* ⑦ 唔喺白名單 → 拒，並列出可用 action */
+  const nm = mk('deleteEverything');
+  const o7 = JSON.parse(post(nm.body).getContent());
+  assert(o7.success === false && o7.code === 'unknown_action' && o7.allowed.length > 0, '白名單外要拒並列可用');
+  /* ⑧ query 通道都要驗得通（GAS 302 轉址會漏 body 通道：上游一次送齊兩種） */
+  const rawQ = JSON.stringify({ action: 'getLoginMode' });
+  const sQ = G.makeLinkSig('getLoginMode', rawQ, key);          // digest 綁完整原始 body
+  const viaQuery = JSON.parse(post(JSON.parse(rawQ), { sig: sQ.sig, sig_ts: sQ.sig_ts, sig_nonce: sQ.sig_nonce }).getContent());
+  assert(viaQuery.success === true, 'query 通道要驗得通：' + JSON.stringify(viaQuery));
+  /* query 通道一樣防重放（同一組 query nonce 用第二次要拒） */
+  const againQ = JSON.parse(post(JSON.parse(rawQ), { sig: sQ.sig, sig_ts: sQ.sig_ts, sig_nonce: sQ.sig_nonce }).getContent());
+  assert(againQ.success === false && againQ.code === 'sig_replayed', 'query 通道重放都要拒');
+});
+
+t('下游範本：閂口（ALLOW_LOCAL_LOGIN）＋403 求救指引 ＋ sig 讀寫白名單分流', () => {
+  const { G, props } = makeSandbox({ downstream: true });
+  props.set('API_KEY', 'downstream-key-123456');
+  const key = props.get('API_KEY');
+  eq(G.localLoginAllowed(), true, '未設定＝開（現有旅團零影響）');
+  G.setLocalLoginAllowed(false);
+  eq(G.localLoginAllowed(), false, '閂得入');
+  /* 閂咗：本地登入一律 403 樣，帶求救連結（唔可以靜靜話「錯密碼」） */
+  const closed = JSON.parse(G.linkHandlePost({ postData: { contents: JSON.stringify({ action: 'login' }) }, parameter: {} }).getContent());
+  assert(closed.success === false && closed.local_login === false && closed.upstream_only === true, '閂口本地登入要回 upstream_only');
+  assert(/求救|旅長/.test(String(closed.rescue) + closed.error), '要指出求救路徑（唔好等人呆等）');
+  /* 閂咗：冇簽名又冇 leaf token 嘅普通讀寫都要拒 */
+  const rd = JSON.parse(G.linkHandlePost({ postData: { contents: JSON.stringify({ action: 'load', table: 'x' }) }, parameter: {} }).getContent());
+  eq(rd.upstream_only, true, '閂口之後普通請求都要拒');
+  /* 上游帶簽名：照做（setLocalLogin 可以開返）＋寫入白名單分流 */
+  const raw = JSON.stringify({ action: 'setLocalLogin', allow: true });
+  const sig = G.makeLinkSig('setLocalLogin', raw, key);
+  const out = JSON.parse(G.linkHandlePost({ postData: { contents: JSON.stringify({ action: 'setLocalLogin', allow: true, ...sig }) }, parameter: {} }).getContent());
+  assert(out.success === true && out.data.allow_local_login === true, '上游經 sig 要開得返：' + JSON.stringify(out));
+  /* 寫入白名單內但未接嘅 action：老實講 not_implemented（唔會扮成功） */
+  const raw2 = JSON.stringify({ action: 'save', table: '進度', rows: [] });
+  const sig2 = G.makeLinkSig('save', raw2, key);
+  const out2 = JSON.parse(G.linkHandlePost({ postData: { contents: JSON.stringify({ action: 'save', table: '進度', rows: [], ...sig2 }) }, parameter: {} }).getContent());
+  assert(out2.success === true && out2.data.note, '範本要接住（回 note 講明係範本位）');
+});
+
+t('★ leaf 自製 session token：下游自己簽、自己驗（唔使每 request 回打上游）', () => {
+  const { G, props } = makeSandbox({ downstream: true });
+  props.set('API_KEY', 'downstream-key-123456');
+  const key = props.get('API_KEY');
+  /* ① 上游帶 sig 叫 leaf 發 token（已經核實身份：sub／role／pv 由上游帶落嚟） */
+  const raw = JSON.stringify({ action: 'leafLogin', sub: 'YMIS-2001', role: 'member', name: '陳家豪', pv: 3 });
+  const sig = G.makeLinkSig('leafLogin', raw, key);
+  const res = JSON.parse(G.linkHandlePost({ postData: { contents: JSON.stringify({ action: 'leafLogin', sub: 'YMIS-2001', role: 'member', name: '陳家豪', pv: 3, ...sig }) }, parameter: {} }).getContent());
+  assert(res.success === true && res.data.leaf_token, 'leafLogin 要發 token：' + JSON.stringify(res).slice(0, 160));
+  const tok = res.data.leaf_token;
+  assert(res.data.ttlMs <= 30 * 60 * 1000, 'TTL 最多 30 分鐘');
+  /* ② 自己驗：通，而且帶返身份 */
+  const v = G.verifyLeafToken(tok, { node: G.linkNodeId_() });
+  assert(v.ok === true, '自己簽嘅 token 要驗得通：' + JSON.stringify(v));
+  eq(v.payload.sub, 'YMIS-2001', '要帶住 SCOUT_ID（全球唯一，升團零改動）');
+  eq(v.payload.pv, 3, '要記密碼版本（改密碼即失效）');
+  /* ③ 改一個字 → 簽名不符 */
+  const broke = tok.slice(0, -2) + (tok.slice(-2) === 'aa' ? 'bb' : 'aa');
+  assert(G.verifyLeafToken(broke).code === 'bad_token', '改過嘅 token 要拒');
+  /* ④ 換密鑰（第二個 node 嘅 key）→ 唔認 */
+  props.set('API_KEY', 'other-node-key-999999');
+  assert(G.verifyLeafToken(tok).code === 'bad_token', '★ 換咗 API_KEY 就唔認得（token 綁本機）');
+  props.set('API_KEY', 'downstream-key-123456');
+  /* ⑤ 到期 → token_expired */
+  const exp = G.verifyLeafToken(tok, { now: Date.now() + 31 * 60 * 1000 });
+  assert(exp.code === 'token_expired', '過期要拒：' + JSON.stringify(exp));
+  /* ⑥ pv 唔同（改過密碼）→ stale_pv（舊 token 全體失效） */
+  assert(G.verifyLeafToken(tok, { pv: 4 }).code === 'stale_pv', '改密碼之後舊 token 要失效');
+  assert(G.verifyLeafToken(tok, { pv: 3 }).ok === true, 'pv 一樣照通');
+  /* ⑦ node 唔同（token 搬去第二個 portal）→ wrong_node */
+  assert(G.verifyLeafToken(tok, { node: '第二個 portal' }).code === 'wrong_node', '唔可以跨 node 用');
+  /* ⑧ TTL 有上下限（唔可以叫 leaf 發 10 年） */
+  const longTok = G.mintLeafToken({ sub: 'X' }, 10 * 365 * 24 * 3600 * 1000);
+  eq(G.verifyLeafToken(longTok, { now: Date.now() }).ok, true, '（長 TTL 會 clamp）');
+  assert(G.verifyLeafToken(longTok, { now: Date.now() + 31 * 60 * 1000 }).code === 'token_expired', '★ 長 TTL 一律 clamp 到 30 分鐘');
+  const shortTok = G.mintLeafToken({ sub: 'X' }, 1000);
+  assert(G.verifyLeafToken(shortTok, { now: Date.now() + 6 * 60 * 1000 }).code === 'token_expired', '★ 短 TTL 一律抬到 5 分鐘（唔會即刻壞）');
+  /* ⑨ 閂咗口：leaf token 有效＝放行（交返自己邏輯）；冇 token＝403 */
+  G.setLocalLoginAllowed(false);
+  const e = { postData: { contents: JSON.stringify({ action: 'myDashboard' }) }, parameter: {} };
+  const blocked = JSON.parse(G.linkHandlePost(e).getContent());
+  assert(blocked && blocked.upstream_only === true, '閂口冇 token 要拒');
+  const e2 = { postData: { contents: JSON.stringify({ action: 'myDashboard', leaf_token: G.mintLeafToken({ sub: 'YMIS-2001' }) }) }, parameter: {} };
+  eq(G.linkHandlePost(e2), null, '★ leaf token 有效＝放行（下游唔使回打上游）');
 });
 
 /* 收尾 */

@@ -17,7 +17,8 @@ export const DOC_FILES = [
   { who: '旅長', file: 'docs/教材/08-開旅-checklist.md', label: '開旅 checklist（A–F）' },
   { who: '旅長', file: 'docs/教材/09-開戶與批核.md', label: '開戶與批核' },
   { who: '全部', file: 'docs/教材/10-移交與升降團.md', label: '移交與升降團（來源／目標團）' },
-  { who: '家長', file: 'docs/教材/11-子女綁定與密碼恢復.md', label: '子女綁定與密碼恢復' }
+  { who: '家長', file: 'docs/教材/11-子女綁定與密碼恢復.md', label: '子女綁定與密碼恢復' },
+  { who: '支部人員', file: 'docs/教材/12-下游接入.md', label: '下游接入（團側 GAS 範本）' }
 ];
 
 export function render(el, params = {}, query = {}) {

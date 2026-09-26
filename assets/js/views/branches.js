@@ -63,6 +63,7 @@ export function render(el) {
       })
     })}
       ${notice('為什麼要登記 <b>sig 用途字串</b>？因為下游係唔同 repo（vsbadge／roverbadge／cubsbadge／vs_portal…），每個 repo 一條 purpose；跨 repo 直接簽唔通，所以旅要逐條下游知對方要邊條。下游側零改動，只係旅「照着抄」。', 'info')}
+      ${notice(`團側仲未有接入？本 repo 有<b>可直接抄嘅範本</b>：<span class="mono">apps-script/Downstream.gs</span>（sig 驗簽＋<b>閂口</b>＋<b>leaf 自製 session token</b>）＋教材 <a href="#/docs?id=files">12-下游接入</a>。四步接完，唔使改旅側任何嘢。`, 'info')}
     </div>`
   }) : ''}
   `;

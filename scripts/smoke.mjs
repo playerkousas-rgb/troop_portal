@@ -1565,6 +1565,32 @@ await test('★ 同步引擎：三色燈＋樂觀鎖＋merge3 逐格問（示範
   S.resetDemo();
 });
 
+await test('★ 下游接入：範本齊（sig 驗簽／閂口／leaf token）＋支部頁指路＋教材 12', async () => {
+  const ds = readFileSync(join(ROOT, 'apps-script/Downstream.gs'), 'utf8');
+  /* ① 範本三件：驗上游簽名、直接入口掣、leaf 自製 session token */
+  assert(/function verifyLinkSig\(/.test(ds), '要有上游簽名驗證');
+  assert(/function localLoginAllowed\(/.test(ds) && /ALLOW_LOCAL_LOGIN/.test(ds), '要有直接入口掣（ALLOW_LOCAL_LOGIN）');
+  assert(/function mintLeafToken\(/.test(ds) && /function verifyLeafToken\(/.test(ds), '★ 要有 leaf 自製 session token');
+  assert(/leaf-session-v1/.test(ds), 'leaf 密鑰要同上游 sig 密鑰分開（唔可以互用）');
+  assert(/LEAF_TOKEN_TTL_MS = 30 \* 60 \* 1000/.test(ds), 'leaf token 上限 30 分鐘');
+  assert(/stale_pv/.test(ds) && /wrong_node/.test(ds), '改密碼／搬 node 要令舊 token 失效');
+  /* ② 下游永不回打上游：範本唔應該有 UrlFetchApp（唯一例外係上游側） */
+  assert(!/UrlFetchApp/.test(ds), '★ 下游範本唔可以回打上游（UrlFetchApp 唔應該出現）');
+  /* ③ 本地憑證操作永不經簽名接受 */
+  assert(/LINK_NEVER_ACTIONS = \['login', 'apply', 'logout', 'changePassword'/.test(ds), 'login／apply／改密碼 要入永不接受清單');
+  /* ④ 支部頁要指路（唔使人盲搵） */
+  const br = readFileSync(join(ROOT, 'assets/js/views/branches.js'), 'utf8');
+  assert(/Downstream\.gs/.test(br), '支部登記頁要提範本檔名');
+  assert(/12-下游接入/.test(br), '支部登記頁要指去教材 12');
+  /* ⑤ 教材＋索引 */
+  const doc = readFileSync(join(ROOT, 'docs/教材/12-下游接入.md'), 'utf8');
+  assert(/leaf 自製 session token/.test(doc) && /永不回打上游/.test(doc), '教材 12 要講晒三條規矩');
+  const idx = readFileSync(join(ROOT, 'docs/教材/README.md'), 'utf8');
+  assert(/12-下游接入\.md/.test(idx), '教材索引要有 12');
+  const docsJs = readFileSync(join(ROOT, 'assets/js/views/docs.js'), 'utf8');
+  assert(/12-下游接入\.md/.test(docsJs), '教材頁清單要有 12');
+});
+
 await test('★ 讀取樂觀化：後端讀到一半有人寫 → 前端誠實講（唔會扮一致）；寫入照樣樂觀鎖', async () => {
   const SYNC = await import('../assets/js/lib/sync.js');
   SYNC.resetSync();
