@@ -1565,6 +1565,55 @@ await test('★ 同步引擎：三色燈＋樂觀鎖＋merge3 逐格問（示範
   S.resetDemo();
 });
 
+await test('★ 部署文件：預檢＋部署步驟涵蓋 P6–P14（新 env／新驗收項）', async () => {
+  const doc = readFileSync(join(ROOT, 'docs/後端部署步驟.md'), 'utf8');
+  assert(/npm run preflight/.test(doc), '部署步驟要叫 ADMIN 先跑 preflight');
+  ['VAPID_PUBLIC_KEY', 'PUSH_INGEST_URL', 'APP_URL'].forEach(k => assert(doc.includes(k), `要提新 env：${k}`));
+  assert(/VAPID 私鑰永遠唔會喺旅側/.test(doc), '要講明私鑰唔喺旅側');
+  ['忘記密碼', '子女綁定', '樂觀鎖', 'sig jti', '紀錄只記 metadata', '推送訂閱', '下游範本'].forEach(k =>
+    assert(doc.includes(k), `驗收清單要有：${k}`));
+  assert(/唯一判準/.test(doc), '要保留「本機綠 ≠ 真通」嘅判準');
+  const readme = readFileSync(join(ROOT, 'README.md'), 'utf8');
+  assert(/preflight/.test(readme), 'README 要提 preflight');
+  S.resetDemo();
+});
+
+await test('★ preflight：只報變數名同狀態（永遠唔印值）＋ 真環境未設就老實報', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const SECRET = 'troop_THIS_MUST_NEVER_SHOW_UP_0123456789';
+  const SESS = 'session-secret-THIS_MUST_NEVER_SHOW_UP_abcdef';
+  const run = extra => {
+    try {
+      return execFileSync('node', [join(ROOT, 'scripts/preflight.mjs')], {
+        cwd: ROOT, encoding: 'utf8',
+        env: { PATH: process.env.PATH, HOME: process.env.HOME, ...extra }
+      });
+    } catch (e) { return String(e.stdout || '') + String(e.stderr || ''); }
+  };
+  /* ① 未設：要老實講（唔會扮綠色），exit code 唔會係 0 */
+  const bare = run({});
+  assert(/未設/.test(bare) && /SESSION_SECRET/.test(bare), '未設要列明：' + bare.slice(0, 200));
+  assert(/跟住做/.test(bare), '要交返清單');
+  /* ② 設咗：只可以見變數名同長度 —— 永遠唔可以見值 */
+  const full = run({
+    SESSION_SECRET: SESS, TROOP_82_BACKEND: 'https://script.google.com/macros/s/AKfyFAKE/exec',
+    TROOP_82_APIKEY: SECRET, SUPER_KEY: 'super-THIS_MUST_NEVER_SHOW_UP', VAPID_PUBLIC_KEY: 'B'.repeat(80),
+    PUSH_INGEST_URL: 'https://library.example/functions/v1/push'
+  });
+  assert(!full.includes(SECRET) && !full.includes(SESS), '★★ preflight 唔可以印任何值：' + full.slice(0, 300));
+  assert(!/AKfyFAKE/.test(full), '★ 連後端 URL 都唔可以印');
+  assert(!/library\.example/.test(full), '★ 館方收件位都唔可以印');
+  assert(/已設/.test(full), '設咗要講已設');
+  assert(/TROOP_82_BACKEND／APIKEY（已設）/.test(full), '要講清邊個旅兩件齊');
+  assert(/已設，長度 \d+/.test(full), 'SESSION_SECRET 只可以報長度');
+  /* ③ 靜態就緒：部署體積要計（<5MB）＋ api 零依賴 */
+  assert(/部署體積/.test(full) && /5MB/.test(full), '要報部署體積＋上限');
+  assert(/api 零依賴/.test(full), '要檢查 api 零依賴');
+  /* ④ npm script 存在 */
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+  assert(pkg.scripts.preflight === 'node scripts/preflight.mjs', '要有 npm run preflight');
+});
+
 await test('★ 個人化訂閱（推送鏈）：sw.js 齊、前端四步真訂閱、示範零 fetch、未開通唔扮成功', async () => {
   const sw = readFileSync(join(ROOT, 'sw.js'), 'utf8');
   assert(/addEventListener\('push'/.test(sw), 'sw.js 要收 push');

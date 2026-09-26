@@ -19,10 +19,12 @@
 
 ```bash
 npm run dev        # → http://localhost:8080/
-npm run check      # lint + 旅 GAS 本機測試（44）+ /api 測試（24）+ jsdom smoke（84）
+npm run check      # lint + 旅 GAS 本機測試（53）+ /api 測試（27）+ jsdom smoke（93）
+npm run preflight  # 上線前檢查：env 齊唔齊、部署體積、私隱（只報變數名，唔會印值）
 ```
 
-> 後端兩層：**旅 SHEET**（`apps-script/Code.gs`）＋**平台**（`api/proxy`／`auth`／`super`／`units`／`downstreams`／`troop`／`registry`／`member-entry`／`share`）。
+> 後端兩層：**旅 SHEET**（`apps-script/Code.gs`）＋**平台**（`api/proxy`／`auth`／`super`／`units`／`downstreams`／`troop`／`registry`／`member-entry`／`share`／`push`）；
+> 下游（團側）範本：`apps-script/Downstream.gs`；推送接收端：`sw.js`；CI：`.github/workflows/check.yml`。
 > 本機測試係假環境（唔會連真 Sheet／真 Vercel）—— **真環境要人手跑一次**，清單見部署步驟 §5。
 > 鐵律唔變：示範模式零 fetch；寫入只有一個掣（「儲存到後端」）；唔會扮成功。
 

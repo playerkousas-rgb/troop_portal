@@ -15,7 +15,8 @@
     "check": "node scripts/lint.mjs && node scripts/gas-test.mjs && node scripts/api-test.mjs && node scripts/smoke.mjs",
     "gas-test": "node scripts/gas-test.mjs",
     "api-test": "node scripts/api-test.mjs",
-    "units": "node scripts/units.mjs"
+    "units": "node scripts/units.mjs",
+    "preflight": "node scripts/preflight.mjs"
   },
   "devDependencies": {
     "jsdom": "^30.1.1"
