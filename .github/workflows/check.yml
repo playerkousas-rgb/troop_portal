@@ -1,0 +1,58 @@
+# ============================================================
+# CI：BUILD §10 體積治理「CI 硬攔」
+# ------------------------------------------------------------
+# 每次 PR／push 都跑：
+#   · npm run lint      —— 靜態檢查＋體積治理（單檔／總量上限）
+#   · npm run gas-test  —— 旅 GAS 邏輯（假 Apps Script 環境）
+#   · npm run api-test  —— /api 合約（密碼／session／sig／訂閱轉發）
+#   · npm run smoke     —— jsdom 全鏈 UI 場景（示範模式，零 fetch）
+# 任何一項唔過＝紅燈，唔准入 main。
+# ============================================================
+name: check
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      # ★ Node 22：jsdom 30 嘅 engines 係 ^22.22.2（Node 20 會喺 undici 直接 TypeError，
+      #   成個 smoke 跑唔到）。改版本要同步 package.json engines；smoke 有測試釘死兩邊一致。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: 安裝測試依賴（jsdom；正式 api 零依賴）
+        run: npm install --no-audit --no-fund
+      - name: lint ＋ 體積治理
+        run: npm run lint
+      - name: 旅 GAS 邏輯（假 Apps Script 環境）
+        run: npm run gas-test
+      - name: /api 合約
+        run: npm run api-test
+      - name: jsdom smoke（全鏈 UI）
+        run: npm run smoke
+      - name: 部署體積（dist < 5MB；冇 node_modules／docs／scripts 入 deploy）
+        run: |
+          node -e "
+          const { execSync } = require('node:child_process');
+          const fs = require('node:fs');
+          const ignore = fs.readFileSync('.vercelignore','utf8').split('\n').map(s=>s.trim()).filter(l=>l && !l.startsWith('#'));
+          let total = 0, files = 0;
+          const walk = (d) => {
+            for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+              const p = d + '/' + e.name;
+              if (ignore.some(ig => e.name === ig.replace(/\/$/, '') || p.includes('/' + ig.replace(/\/$/, '') + '/'))) continue;
+              if (e.isDirectory()) walk(p); else { total += fs.statSync(p).size; files++; }
+            }
+          };
+          walk('.');
+          const mb = total / 1024 / 1024;
+          console.log('部署檔案 ' + files + ' 個 · ' + mb.toFixed(2) + ' MB');
+          if (mb > 5) { console.error('✗ 超過 5MB 上限（BUILD §10 體積治理）'); process.exit(1); }
+          "
