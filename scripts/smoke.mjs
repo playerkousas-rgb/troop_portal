@@ -13,7 +13,7 @@ import { JSDOM } from 'jsdom';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { writeFileSync, unlinkSync } from 'node:fs';
+import { writeFileSync, unlinkSync, readdirSync } from 'node:fs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const results = [];
@@ -2152,6 +2152,29 @@ await test('★ 文件數字唔可以漂移：README／UI 導覽／落差報告 
     assert(m, `搵唔到${what}：${re}`);
     assert(Number(m[1]) === want, `★ ${what} 漂移：寫 ${m[1]}，實際 ${want}（改文件，唔好改測試遷就）`);
   };
+  /* ④ 其他容易漂嘅數字：api 支數／教材份數／驗收清單項數／旅長見幾多模組 */
+  const apiFiles = readdirSync(join(ROOT, 'api')).filter(f => f.endsWith('.js')).length;
+  const docFiles = readdirSync(join(ROOT, 'docs/教材')).filter(f => f.endsWith('.md') && f !== 'README.md').length;
+  const deploy = readFileSync(join(ROOT, 'docs/後端部署步驟.md'), 'utf8');
+  const sec5 = deploy.slice(deploy.indexOf('## 5. 驗收清單'), deploy.indexOf('\n## 6.'));
+  const checklist = sec5.split('\n').filter(l => /^- \[ \]/.test(l.trim()) && !/^- \[ \] 一句：/.test(l.trim())).length;
+  const chiefModules = R.MODULES.filter(m => (m.roles || []).includes('chief')).length;
+  one(readme, /api\/\*\.js` \*\*(\d+) 支\*\*/, 'README api 支數', apiFiles);
+  one(readme, /旅長＝(\d+) 個模組/, 'README 旅長模組數', chiefModules);
+  one(ui, /已寫好 \*\*(\d+) 支\*\*/, 'UI 導覽 api 支數', apiFiles);
+  one(ui, /本機 (\d+) 項測試綠/, 'UI 導覽 api 測試項', apiN);   // 第一個「本機 N 項測試綠」＝/api 嗰行
+  const gasLine = ui.split('\n').find(l => l.includes('`Code.gs`（白名單'));
+  assert(gasLine && /本機 (\d+) 項測試綠/.test(gasLine), '搵唔到 Code.gs 嗰行嘅測試項數');
+  assert(Number(gasLine.match(/本機 (\d+) 項測試綠/)[1]) === gasN, '★ UI 導覽 Code.gs 測試項漂移：' + gasLine.slice(0, 80));
+  one(ui, /假 Apps Script 環境 (\d+) 項/, 'UI 導覽 GAS 測試項', gasN);
+  one(ui, /`docs\/教材\/`（(\d+) 份＋索引）/, 'UI 導覽教材份數', docFiles);
+  one(ui, /ADMIN 人手步驟 ＋ (\d+) 項驗收清單/, 'UI 導覽驗收項數', checklist);
+  one(gap, /`\/api\/\*` \*\*(\d+) 支\*\*/, '落差報告 api 支數', apiFiles);
+  const gapApi2 = gap.match(/＝\*\*(\d+) 支\*\*，本機 \*\*(\d+) 項\*\*綠/);
+  assert(gapApi2 && Number(gapApi2[1]) === apiFiles && Number(gapApi2[2]) === apiN,
+    '★ 落差報告 §5 嘅 api 支數／測試項漂移：' + (gapApi2 ? gapApi2[0] : '（搵唔到）'));
+  one(gap, /教材 1–(\d+)/, '落差報告教材份數', docFiles);
+  one(gap, /驗收清單 (\d+) 項/, '落差報告驗收項數', checklist);
   one(readme, /jsdom smoke（(\d+)）/, 'README smoke 數', total);
   one(readme, /旅 GAS 本機測試（(\d+)）/, 'README GAS 數', gasN);
   one(readme, /\/api 測試（(\d+)）/, 'README api 數', apiN);
