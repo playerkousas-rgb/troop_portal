@@ -2127,6 +2127,57 @@ await test('互動掃描：每個模組／分頁所有掣撳一次（連 async h
   S.resetDemo();                                                       // 掃描改過嘅示範資料還原
 });
 
+await test('★ 文件數字唔可以漂移：README／UI 導覽／落差報告 ↔ 真測試數目 ↔ lint 體積', async () => {
+  /* ① Node 版本：jsdom 30 要 ^22.22.2 —— README 要講明，免得下個人又用 node 20 撞落 undici */
+  const readme = readFileSync(join(ROOT, 'README.md'), 'utf8');
+  assert(/Node ≥ 22/.test(readme), 'README 要寫明 Node ≥ 22（jsdom 30 嘅 engines）');
+  /* ② 真源：① 呢個 suite 實際跑咗幾多項 ② gas／api script 入面 t(...) 數目 ③ lint 嘅體積算法 */
+  const total = results.length + 1;                       // 連今次呢一項
+  const gasN = (readFileSync(join(ROOT, 'scripts/gas-test.mjs'), 'utf8').match(/^\s*t\('/gm) || []).length;
+  const apiN = (readFileSync(join(ROOT, 'scripts/api-test.mjs'), 'utf8').match(/^\s*t\('/gm) || []).length;
+  assert(gasN >= 50 && apiN >= 20, `t(...) 數目唔合理（gas ${gasN}／api ${apiN}）—— 改過測試寫法？`);
+  /* 體積／檔數：唔自己重算（易走樣），直接跑 lint 攞佢自己報嘅數 */
+  const { execFileSync } = await import('node:child_process');
+  let lintOut = '';
+  try { lintOut = execFileSync(process.execPath, [join(ROOT, 'scripts/lint.mjs')], { cwd: ROOT, encoding: 'utf8' }); }
+  catch (e) { throw new Error('lint 唔過，體積數字無從核對：' + String((e.stdout || '') + (e.stderr || '')).slice(-400)); }
+  const lintFiles = Number((lintOut.match(/旅系統 lint — 檔案 (\d+)/) || [])[1]);
+  const lintKB = Number((lintOut.match(/體積：(\d+) KB/) || [])[1]);
+  assert(Number.isFinite(lintFiles) && Number.isFinite(lintKB), '解析唔到 lint 嘅檔數／體積');
+  /* ③ 三份文件：數字同真源對唔上就紅（要改文件，唔好改測試遷就） */
+  const ui = readFileSync(join(ROOT, 'docs/UI-示範導覽.md'), 'utf8');
+  const gap = readFileSync(join(ROOT, 'docs/落差報告.md'), 'utf8');
+  const one = (src, re, what, want) => {
+    const m = src.match(re);
+    assert(m, `搵唔到${what}：${re}`);
+    assert(Number(m[1]) === want, `★ ${what} 漂移：寫 ${m[1]}，實際 ${want}（改文件，唔好改測試遷就）`);
+  };
+  one(readme, /jsdom smoke（(\d+)）/, 'README smoke 數', total);
+  one(readme, /旅 GAS 本機測試（(\d+)）/, 'README GAS 數', gasN);
+  one(readme, /\/api 測試（(\d+)）/, 'README api 數', apiN);
+  one(ui, /`smoke` \*\*(\d+)\/\d+\*\*/, 'UI 導覽 smoke 數', total);
+  one(ui, /旅 GAS 本機測試 \*\*(\d+)\/\d+\*\*/, 'UI 導覽 GAS 數', gasN);
+  one(ui, /`\/api` 測試 \*\*(\d+)\/\d+\*\*/, 'UI 導覽 api 數', apiN);
+  one(ui, /lint` 全綠（(\d+) 檔/, 'UI 導覽檔數', lintFiles);
+  one(ui, /lint` 全綠（\d+ 檔 · (\d+) KB）/, 'UI 導覽體積 KB', lintKB);
+  /* 落差報告：smoke 數字全部要一樣（同一份文件可能寫幾次） */
+  /* 兩種寫法都要食：§0 係「smoke **95/95**」，§1 係「**smoke 95/95**」 */
+  const gapSmoke = [...gap.matchAll(/(?:\*\*smoke |smoke \*\*)(\d+)\/\d+/g)].map(m => Number(m[1]));
+  assert(gapSmoke.length >= 2, '落差報告應該有兩處寫住 smoke 數（§0 同 §1）');
+  for (const n of gapSmoke) assert(n === total, `★ 落差報告 smoke 數漂移：寫 ${n}，實際 ${total}`);
+  for (const m of gap.matchAll(/GAS (\d+) ／ api (\d+)/g)) {
+    assert(Number(m[1]) === gasN && Number(m[2]) === apiN, `★ 落差報告 GAS／api 數漂移：寫 ${m[1]}／${m[2]}，實際 ${gasN}／${apiN}`);
+  }
+  const gapVolLines = gap.split('\n').filter(l => /lint \d+ 檔 · \d+ KB/.test(l) && !/歷史|當時/.test(l));
+  assert(gapVolLines.length >= 1, '落差報告要寫住現行 lint 檔數／體積（舊數字請標明「當時」）');
+  for (const l of gapVolLines) {
+    const m = l.match(/lint (\d+) 檔 · (\d+) KB/);
+    assert(Number(m[1]) === lintFiles && Number(m[2]) === lintKB,
+      `★ 落差報告 lint 檔數／體積漂移：寫 ${m[1]} 檔 · ${m[2]} KB，實際 ${lintFiles} 檔 · ${lintKB} KB`);
+  }
+  S.resetDemo();
+});
+
 /* 測試衛生：示範模式／真模式都唔應該留低定時器同 session（唔然個 process 唔會退） */
 A.logout();
 A.stopSilentRefresh();
