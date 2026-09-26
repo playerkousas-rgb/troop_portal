@@ -185,6 +185,7 @@ export function render(el, params, query = {}) {
         <dt>基準版本</dt><dd class="mono">${esc(st.baseVersion || '（未對齊）')}</dd>
         <dt>上次成功</dt><dd>${st.lastAt ? esc(fmtStamp(new Date(st.lastAt).toISOString())) : '未試過'}</dd>
         <dt>上次錯誤</dt><dd>${st.lastError ? esc(String(st.lastError)) : '冇'}</dd>
+        <dt>上次讀取覆查</dt><dd>${st.lastReadNote ? `<span class="mono xs">${esc(String(st.lastReadNote))}</span>（讀咗 ${st.lastReadRounds || 1} 轉）` : '一致（pointer 覆查：讀取唔使等寫鎖）'}</dd>
         <dt>下次自動重試</dt><dd>${(() => {
         const qi = SYNC.queueInfo();
         if (!qi.size) return '—';

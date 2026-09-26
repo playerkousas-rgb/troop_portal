@@ -114,6 +114,10 @@ export async function syncNow({ api = API, mode = 'ask', tables = null, decision
   if (!remote.ok) return failSave(remote, mine, 'load');
   const theirs = remote.data?.data || remote.data?.tables || {};
   const base = st.base || {};
+  /* ★ 讀取樂觀化：後端讀到一半有人寫入（pointer 變咗）會話你知 —— 唔會扮一致。
+     我哋照合併，但以對方版本為 base（之後寫入一樣行樂觀鎖），並且誠實記低。 */
+  const inconsistentRead = remote.data?.consistent === false;
+  const readNote = inconsistentRead ? (remote.data?.note || '讀取期間有人寫入（已重試）—— 版本以 version 為準') : '';
 
   const merged = {}, asks = [], overwrote = [], picked = { mine: 0, theirs: 0 };
   for (const [t, rows] of Object.entries(mine)) {
@@ -161,10 +165,12 @@ export async function syncNow({ api = API, mode = 'ask', tables = null, decision
   store({
     base: { ...(st.base || {}), ...merged }, baseVersion: wrote.data?.version || remote.data?.version || '',
     dirty: 0, failing: 0, lastError: null, lastAt: Date.now(), everSaved: true, pending: [], lastWrote: Object.keys(merged),
-    lastConflictPicked: decisions ? picked : null
+    lastConflictPicked: decisions ? picked : null,
+    /* 讀取覆查唔一致：成功都要留低（唔係錯誤，但要見到） */
+    lastReadNote: readNote, lastReadRounds: remote.data?.readRounds || 0
   });
   if (readQueue().length) clearQueue();
-  return { ok: true, merged, wrote: Object.keys(merged), overwrote, picked, light: light() };
+  return { ok: true, merged, wrote: Object.keys(merged), overwrote, picked, inconsistentRead, light: light() };
 }
 function failSave(res, tables, where) {
   const st = state();

@@ -130,6 +130,7 @@ export const baseVersion = () => _baseVersion;
 export const setBaseVersion = v => { _baseVersion = String(v || ''); return _baseVersion; };
 export async function loadTables(tables) {
   const g = guard(); if (g) return g;
+  /* 讀取樂觀化：後端會回 consistent（pointer 覆查結果）——原封不動交俾同步層判斷 */
   const out = await jfetch('/api/proxy', { action: 'loadTables', unit: unitId(), payload: { tables } });
   if (out.ok && out.data?.version) setBaseVersion(out.data.version);       // 記住 server 版本做下次寫入嘅 base
   return out;

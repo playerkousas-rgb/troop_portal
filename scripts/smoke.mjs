@@ -1565,6 +1565,36 @@ await test('★ 同步引擎：三色燈＋樂觀鎖＋merge3 逐格問（示範
   S.resetDemo();
 });
 
+await test('★ 讀取樂觀化：後端讀到一半有人寫 → 前端誠實講（唔會扮一致）；寫入照樣樂觀鎖', async () => {
+  const SYNC = await import('../assets/js/lib/sync.js');
+  SYNC.resetSync();
+  S.setMock(false);
+  SYNC.markBase({ notices: [{ id: 'n-1', title: '旅露營' }] });
+  const baseRow = { id: 'n-1', title: '旅露營' };
+  const theirs = [baseRow];                                  // 對面冇改呢行（唔會撞格）
+  let sawBase = null;
+  const api = {
+    loadTables: async () => ({ ok: true, data: { data: { notices: theirs }, version: 'v7', consistent: false, readRounds: 3, note: '讀取期間有人寫入（已重試 3 次）' } }),
+    saveTables: async (tb, opts) => { sawBase = opts?.baseVersion; return { ok: true, data: { version: 'v8' } }; }
+  };
+  const r = await SYNC.syncNow({ api, tables: { notices: [baseRow, { id: 'n-2', title: '我新加嘅活動' }] } });
+  eq(r.inconsistentRead, true, '★ 唔一致要浮上面（唔可以靜靜當冇事）');
+  assert(/有人寫入/.test(String(SYNC.state().lastReadNote || '')), '要喺同步狀態留住「讀取期間有人寫入」（唔係錯誤，但要見到）');
+  eq(SYNC.state().lastReadRounds, 3, '要記低覆查讀咗幾轉');
+  assert(!!sawBase, '寫入仍要帶版本（樂觀鎖照行）：' + sawBase);
+  /* 一致嘅讀：唔應該無端出警告 */
+  SYNC.resetSync();
+  const api2 = { loadTables: async () => ({ ok: true, data: { data: {}, version: 'v1', consistent: true } }), saveTables: async () => ({ ok: true, data: { version: 'v2' } }) };
+  const r2 = await SYNC.syncNow({ api: api2, tables: { notices: [] } });
+  eq(r2.inconsistentRead, false, '一致嘅讀唔應該報唔一致');
+  /* 後端側：GAS 一定要有 pointer 覆查（唔可以只做前端） */
+  const gas = readFileSync(join(ROOT, 'apps-script/Code.gs'), 'utf8');
+  assert(/var READ_ACTIONS = \['status', 'dbInfo', 'load', 'loadTables', 'getVersion'\]/.test(gas), 'GAS 要有讀取白名單');
+  assert(/needsLock = READ_ACTIONS\.indexOf\(action\) < 0/.test(gas), '讀取唔應該攞全域寫鎖');
+  assert(/consistent: stable/.test(gas), 'GAS 要回 consistent');
+  SYNC.resetSync(); S.setMock(true); S.resetDemo();
+});
+
 await test('★ sig jti：一次性簽名有持久環（cache 蒸發都擋得住）；GAS 源碼釘死', async () => {
   const gas = readFileSync(join(ROOT, 'apps-script/Code.gs'), 'utf8');
   assert(/function jtiOf_/.test(gas), '要有 jti 衍生（nonce → 摘要）');

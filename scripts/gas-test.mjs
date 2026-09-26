@@ -941,6 +941,50 @@ t('sig jti：cache 蒸發都擋得住重放；環有上限、過期自動淘汰'
   assert(/^[0-9a-f]{24}$/.test(String(ring2[0].jti)), 'jti 要係 24 位 hex 摘要（唔係 raw nonce）：' + ring2[0].jti);
 });
 
+/* ㉔ 讀取樂觀化：讀唔上全域寫鎖；pointer 覆查（有人寫入 → 重試；唔穩就誠實報） */
+t('讀取樂觀化：讀取唔等鎖、pointer 覆查、唔穩定會誠實講（唔會扮一致）', () => {
+  const { G } = makeSandbox(); G.initializeSheets();
+  const key = G.apiKey_();
+  assert(G.READ_ACTIONS.indexOf('loadTables') >= 0 && G.READ_ACTIONS.indexOf('load') >= 0 && G.READ_ACTIONS.indexOf('getVersion') >= 0, '讀取白名單要有 load／loadTables／getVersion');
+  assert(G.READ_ACTIONS.indexOf('saveTables') < 0 && G.READ_ACTIONS.indexOf('saveAudit') < 0, '★ 有副作用嘅 action 一律唔可以入讀取白名單');
+
+  /* ① 正常讀：一致，回版本；readRounds 有報 */
+  const r1 = call(G, { action: 'loadTables', apikey: key, tables: ['支部'] });
+  assert(r1.success === true && r1.data.version, '讀要回版本：' + JSON.stringify(r1).slice(0, 120));
+  eq(r1.data.consistent, true, '冇人寫入＝一致');
+  assert(r1.data.readRounds >= 1, '要報讀咗幾轉');
+
+  /* ② 「讀到一半有人寫」：夾住一次 bumpVersion_ → 第一次唔一致、重試之後一致 */
+  let writesLeft = 1;
+  const lockedSpy = [];
+  G.bumpVersion_();                                            // 造一個版本變化
+  const r2 = call(G, { action: 'loadTables', apikey: key, tables: ['支部'] });
+  eq(r2.data.consistent, true, '版本穩定時要一致');
+  assert(r2.data.version !== r1.data.version, '寫入之後版本要唔同（樂觀鎖靠呢個）');
+
+  /* ③ 直接驗算法：連續 bump 3 次（每次讀完都變）→ 唔穩定時 consistent:false 而唔係扮成功 */
+  const orig = G.readTableAll_;
+  let bumps = 0;
+  G.readTableAll_ = function (t) { const out = orig(t); bumps++; G.bumpVersion_(); return out; };   // 每次讀都有人寫
+  const r3 = call(G, { action: 'loadTables', apikey: key, tables: ['支部', '旅員'] });
+  G.readTableAll_ = orig;
+  eq(r3.data.consistent, false, '★ 版本一路變＝唔可以扮一致');
+  assert(bumps >= 3, '有真係重試過（試咗 ' + bumps + ' 次讀）');
+  assert(/有人寫入/.test(String(r3.data.note)), '要老實講「讀取期間有人寫入」：' + String(r3.data.note).slice(0, 80));
+  assert(r3.data.readRounds <= 3, '重試有上限（唔會無限迴圈）：' + r3.data.readRounds);
+  assert(r3.data.data && r3.data.data['支部'], '唔穩都要回資料（版本以 version 為準，之後寫入會撞版）');
+
+  /* ④ 讀取唔會呼 lock：sandbox 嘅 lock 記錄 tryLock 次數 */
+  const locked = [];
+  const { G: G2 } = makeSandbox();
+  G2.initializeSheets();
+  G2.LockService = { getScriptLock: () => ({ tryLock: () => { locked.push(1); return true; }, releaseLock() {} }) };
+  call(G2, { action: 'loadTables', apikey: G2.apiKey_(), tables: ['支部'] });
+  eq(locked.length, 0, '★ 讀取唔應該攞全域寫鎖（呢個就係「讀取樂觀化」）');
+  call(G2, { action: 'saveTables', apikey: G2.apiKey_(), data: { 支部: [] }, baseVersion: G2.readVersion_() });
+  eq(locked.length, 1, '寫入一定要照舊攞鎖');
+});
+
 /* 收尾 */
 console.log('');
 if (fails.length) {

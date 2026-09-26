@@ -69,6 +69,13 @@ var READ_ACTIONS = ['load', 'loadTables', 'getLoginMode', 'getLinkState', 'getSu
   'getAllUsers', 'getNotices', 'getFinance', 'getInventory', 'getCalendar', 'getPublicProfile', 'getApplications', 'getAuditLog'];
 
 /** 寫 action 白名單（上游可以寫下游） */
+/* ★ 讀取樂觀化（BUILD §10 條 7）：**讀唔使等全域寫鎖**。
+   白名單以外嘅 action 一律照舊上鎖（保守：唔會靜靜放行有副作用嘅嘢）。
+   讀取用「pointer 覆查」代替上鎖：讀 version → 讀資料 → 再讀 version，
+   兩次一樣＝讀到嘅一定係同一版；唔一樣就重試，仍然唔穩就誠實回報
+   `consistent:false`（前端有樂觀鎖＋backoff 兜住）。 */
+var READ_ACTIONS = ['status', 'dbInfo', 'load', 'loadTables', 'getVersion'];
+
 var WRITE_ACTIONS = ['save', 'saveTable', 'saveTables', 'upsertUser', 'importUsers', 'addMember', 'bulkAddUsers',
   'resetPassword', 'updateUserProfile', 'setUserStatus', 'deleteUser', 'updateUserRole', 'updatePermissions',
   'saveNotice', 'saveFinanceEntry', 'setLocalLogin', 'setGate'];
@@ -1165,8 +1172,9 @@ function doPost(e) {
   var action = String(body.action || '').trim();
   CTX = { mode: 'guest', actor: '', role: '', identity: '', branch: '', body: body, ip: sanitizeLabel_(params.ip || 'sheet'), matched: [] };
 
-  var lock = LockService.getScriptLock();
-  var locked = lock.tryLock(20000);
+  var needsLock = READ_ACTIONS.indexOf(action) < 0;          // 讀取樂觀化：讀唔上鎖
+  var lock = needsLock ? LockService.getScriptLock() : null;
+  var locked = needsLock ? lock.tryLock(20000) : true;
   var t0 = now_().getTime();
   try {
     if (!locked) return ContentService.createTextOutput(json_(err_('busy', '系統忙（等唔到鎖）—— 請再試'))).setMimeType(ContentService.MimeType.JSON);
@@ -1211,7 +1219,7 @@ function doPost(e) {
   } catch (ex) {
     Logger.log('doPost error: ' + ex);
     return ContentService.createTextOutput(json_(err_('exception', String(ex && ex.message || ex)))).setMimeType(ContentService.MimeType.JSON);
-  } finally { if (locked) lock.releaseLock(); }
+  } finally { if (locked && lock) lock.releaseLock(); }        // 讀取樂觀化：讀冇 lock 物件
 }
 
 function dispatch_(action, body, params) {
@@ -1241,10 +1249,25 @@ function dispatch_(action, body, params) {
       return ok_(sensitive ? rows : rows.map(function (r) { return publicUser_(r); }));
     }
     case 'loadTables': {
-      var data = {}; (body.tables && body.tables.length ? body.tables : TABLES).forEach(function (t) { if (TABLES.indexOf(t) >= 0) data[t] = readTableAll_(t).map(publicUser_); });   // 分件都讀齊
-      return ok_({ data: data, version: readVersion_(), appVersion: APP.version });       // version＝資料版本（樂觀鎖）；appVersion＝後端程式版
+      /* 讀取樂觀化：pointer 覆查（唔上全域鎖）—— 兩次讀到同一版本＝一致 */
+      var want = (body.tables && body.tables.length ? body.tables : TABLES).filter(function (t) { return TABLES.indexOf(t) >= 0; });
+      var vBefore = readVersion_(), data = {}, vAfter = vBefore, stable = true, rounds = 0;
+      for (var r = 0; r < 3; r++) {
+        rounds = r + 1;
+        vBefore = readVersion_();
+        data = {};
+        want.forEach(function (t) { data[t] = readTableAll_(t).map(publicUser_); });
+        vAfter = readVersion_();
+        if (vAfter === vBefore) { stable = true; break; }
+        stable = false;
+      }
+      return ok_({
+        data: data, version: vBefore, appVersion: APP.version,
+        consistent: stable, readRounds: rounds,
+        note: stable ? '' : '讀取期間有人寫入（已重試 ' + rounds + ' 次）—— 版本以 version 為準，寫入會照樣行樂觀鎖'
+      });
     }
-    case 'getVersion': return ok_({ version: readVersion_(), appVersion: APP.version });
+    case 'getVersion': return ok_({ version: readVersion_(), appVersion: APP.version, consistent: true });
     case 'saveTables': {
       if (!body.data || typeof body.data !== 'object') return err_('bad_data', '冇 data');
       /* 樂觀鎖：帶咗 baseVersion 而對唔上（有人搶先寫）→ 唔寫，回 conflict ＋現行版本 */
