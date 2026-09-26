@@ -8,7 +8,7 @@
    ============================================================ */
 
 import { makeDemo } from './demo.js';
-import { deepClone, toast } from './util.js';
+import { deepClone, toast, redactMeta } from './util.js';
 import { defaultRankFor, gateOfLink } from './registry.js';
 
 const K_DATA = 'troop.demo.db.v1';
@@ -451,7 +451,8 @@ export function audit(action, target = '', detail = '', via = 'UI') {
     d.audit.unshift({
       id: 'au-' + Date.now(), at, actor: u?.name || session?.email || '（訪客）',
       role: session?.role || 'guest', identity: session?.identity || '', branchId: session?.branchId || '',
-      action, target, via, detail
+      /* ★ 只記 metadata：內容（長文字）唔入審計；email／電話遮住 */
+      action, target: redactMeta(target), via, detail: redactMeta(detail)
     });
   }, { markDirty: false, silent: true });
 }

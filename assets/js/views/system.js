@@ -136,7 +136,7 @@ export function render(el, params, query = {}) {
     body = `
     ${toolbarLocal()}
     <div class="grid g2">
-      ${card({ title: `審計紀錄（AUDIT_LOG · ${d.audit.length} 行）`, sub: 'append-only、prev_hash 鏈、server-side 寫入、24 個月後 purge',
+      ${card({ title: `審計紀錄（AUDIT_LOG · ${d.audit.length} 行）`, sub: 'append-only、prev_hash 鏈、server-side 寫入、24 個月後 purge · ★ 只記 metadata（唔記內容：長文字＝[內容不記錄 len=N]、email／電話遮住）',
       body: table({
         cls: 'tbl compact', head: ['時間', '操作者', '動作', '對象', '途徑', '詳情'],
         rows: d.audit.map(a => ({

@@ -1565,6 +1565,47 @@ await test('★ 同步引擎：三色燈＋樂觀鎖＋merge3 逐格問（示範
   S.resetDemo();
 });
 
+await test('★ 紀錄只記 metadata：內容唔入審計（只記長度）、email／電話遮住、UI 講明白', async () => {
+  const U = await import('../assets/js/lib/util.js');
+
+  /* ① 規則本身：長文字＝內容，唔記；短 id／狀態＝metadata，照記 */
+  const long = '呢段係通告內文。'.repeat(11);        // 88 字＞門檻 80
+  eq(U.redactMeta(long), `[內容不記錄 len=${long.length}]`, '★ 長文字唔可以入 log（只記長度）');
+  eq(U.redactMeta('ACTIVE'), 'ACTIVE', '短狀態要原樣留住');
+  eq(U.redactMeta('n-9'), 'n-9', 'id 要原樣留住');
+  const em = U.redactMeta('chan.tai-man@demo.hk');
+  assert(!/chan\.tai-man@demo\.hk/.test(em) && /@demo\.hk/.test(em), '★ email 要遮中間（網域留住）：' + em);
+  const ph = U.redactMeta('9123 4567');
+  assert(!/9123/.test(ph) && /4567/.test(ph), '★ 電話只留尾 4 位：' + ph);
+  eq(U.redactMeta(''), '', '空字串照回空');
+
+  /* ② 真寫一次審計：入本機 audit 嘅一定係遮好嘅 */
+  A.loginAs('u-chief');
+  main.boot();
+  const n0 = S.load().audit.length;
+  S.audit('發通告', 'n-9', long);
+  S.audit('改帳號狀態', 'chan.tai-man@demo.hk', 'ACTIVE');
+  const rows = S.load().audit.slice(0, S.load().audit.length - n0);
+  assert(rows.length >= 2, '要寫入兩條審計');
+  assert(!rows.some(r => /通告內文/.test(String(r.detail))), '★ 本機審計都唔可以有內容');
+  assert(rows.some(r => /\[內容不記錄 len=\d+\]/.test(String(r.detail))), '要記長度');
+  assert(!rows.some(r => /chan\.tai-man@demo\.hk/.test(String(r.target))), '★ 本機審計唔可以有完整 email');
+
+  /* ③ UI：審計卡要講明只記 metadata（用戶睇得到） */
+  fireHash(w, '#/system?tab=audit');
+  const t = text();
+  assert(/只記 metadata/.test(t), '審計卡要寫明只記 metadata');
+  assert(/內容不記錄/.test(t), '要講明長文字唔記內容');
+
+  /* ④ 後端同一套規則（唔可以只做前端） */
+  const gas = readFileSync(join(ROOT, 'apps-script/Code.gs'), 'utf8');
+  assert(/function redactMeta_/.test(gas), 'GAS 要有 redactMeta_');
+  assert(/detail: redactMeta_\(String\(detail/.test(gas), '審計 detail 要過紅acted');
+  assert(/email: redactMeta_\(sanitizeLabel_\(email/.test(gas), 'ACCESS_LOG email 都要遮');
+  assert(/LOG_META_MAX/.test(gas), '要有「幾長當內容」嘅門檻');
+  S.resetDemo();
+});
+
 await test('★ backoff＋jitter 硬化：錯誤碼統一（讀寫同一套）＋讀取都會重試＋隊列記下次時間', async () => {
   const SYNC = await import('../assets/js/lib/sync.js');
   const OB = await import('../assets/js/lib/offline.js');

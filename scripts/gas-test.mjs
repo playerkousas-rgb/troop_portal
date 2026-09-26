@@ -863,6 +863,44 @@ t('子女綁定：要領袖確認先寫落 children；名冊對唔上／自己�
   eq(kidRow.role, 'member', '子女戶角色唔變');
 });
 
+/* ㉒ 紀錄只記 metadata：內容唔入 log、email／電話遮住；審計鏈照樣驗得到 */
+t('紀錄只記 metadata：內容唔入 log、email／電話遮住，但審計鏈不變', () => {
+  const { G, props } = makeSandbox(); G.initializeSheets();
+  const key = props.get('API_KEY');
+
+  /* ① 長文字（＝內容）唔應該入 log：只記長度 */
+  const long = '呢段係通告內文，唔應該入審計紀錄。'.repeat(6) + '（共 N 字）';
+  call(G, { action: 'saveAudit', apikey: key, actionName: '發通告', target: 'n-9', detail: long });
+  const au = G.readTable_('審計紀錄');
+  assert(au.length >= 1, '要寫得到審計');
+  const last = au[au.length - 1];
+  assert(!/通告內文/.test(String(last.detail)), '★ 長文字內容唔可以入 log：' + String(last.detail).slice(0, 60));
+  assert(/\[內容不記錄 len=\d+\]/.test(String(last.detail)), '要記長度做 metadata：' + String(last.detail).slice(0, 60));
+  assert(/len=\d+/.test(String(last.detail)), 'len 要係真數字');
+
+  /* ② email 遮中間、電話遮中間；短 metadata（狀態／版本）照樣留住 */
+  call(G, { action: 'saveAudit', apikey: key, actionName: '改帳號狀態', target: 'chan.tai-man@demo.hk', detail: 'ACTIVE' });
+  call(G, { action: 'saveAudit', apikey: key, actionName: '聯絡', target: '家長', detail: '9123 4567' });
+  const au2 = G.readTable_('審計紀錄');
+  const rowEmail = au2[au2.length - 2], rowPhone = au2[au2.length - 1];
+  assert(!/chan\.tai-man@demo\.hk/.test(JSON.stringify(au2)), '★ 完整 email 唔可以入 log');
+  assert(/@demo\.hk/.test(String(rowEmail.target)), '網域留住（追蹤夠用）');
+  assert(!/9123 4567|91234567/.test(String(rowPhone.detail)), '★ 完整電話唔可以入 log：' + rowPhone.detail);
+  assert(/\*\*\*\*-\s*4567|\*\*\*\*/.test(String(rowPhone.detail)), '電話只留尾 4 位／遮住');
+  assert(rowEmail.detail === 'ACTIVE', '短 metadata（狀態）要原樣留住');
+
+  /* ③ 遮完先算 hash：審計鏈一樣驗得到 */
+  const chain = G.verifyAuditChain_();
+  assert(chain.ok === true, '審計鏈要完好（紅acted 之後先 hash）：' + JSON.stringify(chain).slice(0, 100));
+
+  /* ④ 操作紀錄（ACCESS_LOG）一樣：email 唔可以完整入 log */
+  call(G, { action: 'saveAudit', apikey: key, actionName: '（略）', detail: 'x' });
+  const ac = G.readTable_('操作紀錄');
+  ac.push(G.access_('LOGIN_OK', 'chan.tai-man@demo.hk', '203.0.113.9', 'ua=' + 'y'.repeat(300)));
+  assert(!/chan\.tai-man@demo\.hk/.test(JSON.stringify(ac)), 'ACCESS_LOG email 都要遮');
+  assert(/\[內容不記錄 len=\d+\]/.test(String(ac[ac.length - 1].meta)), 'ACCESS_LOG 長 meta 唔記內容');
+});
+
 /* 收尾 */
 console.log('');
 if (fails.length) {

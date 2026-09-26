@@ -438,11 +438,40 @@ function appendLog_(name, obj) {
   sh.appendRow(header.map(function (h) { return row[h] === undefined ? '' : (h === 'hash' || h === 'prev_hash' ? String(row[h]) : (typeof row[h] === 'object' ? json_(row[h]) : row[h])); }));
   return row;
 }
+/* ★ 紀錄只記 metadata（BUILD §10 條 7／§8 私隱）：
+   審計係用嚟追「邊個幾時做過咩」，唔係用嚟備份內容。所以全部 log 都經呢支收口：
+     · email → 遮中間（`chan…@demo.hk`），唔會儲存完整電郵
+     · 電話（8 位香港號碼）→ `****1234`
+     · 長文字（通告內文、退問原因、求救詳情、備註…）→ `[內容不記錄 len=123]`
+     · 短嘅識別碼／狀態／版本／數字 → 原樣留住（呢啲先係追蹤要用嘅 metadata）
+   紅acted 之後先算 hash，所以審計鏈照樣驗得到。 */
+var LOG_META_MAX = 80;                        // 單一欄位最多記幾多字（超過＝當內容，唔記）
+function redactMeta_(v) {
+  var t = String(v == null ? '' : v);
+  if (!t) return '';
+  /* email：只留頭兩個字＋網域（唔會儲存完整電郵） */
+  t = t.replace(/[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g, function (m, dom) {
+    return m.slice(0, 2) + '…@' + dom;
+  });
+  /* 香港電話：+852／帶分隔嘅 8 位號碼 → 只留尾 4 位（唔會誤中純 8 位數字如日期碼） */
+  t = t.replace(/(?:\+?852[\s-]?)?\b(\d{4})[\s-](\d{4})\b/g, function (m, a, b) { return '****-' + b; });
+  /* 長文字：唔記錄內容，只記長度（追蹤夠用） */
+  if (t.length > LOG_META_MAX) return '[內容不記錄 len=' + t.length + ']';
+  return t;
+}
 function audit_(actor, action, target, detail, via) {
-  return appendLog_('審計紀錄', { id: uid_('au'), at: stamp_(), actor: sanitizeLabel_(actor), role: sanitizeLabel_(role_()), identity: sanitizeLabel_(identity_()), branchId: sanitizeLabel_(branch_()), action: String(action || '').slice(0, 40), target: String(target || '').slice(0, 120), detail: String(detail || '').slice(0, 400), via: sanitizeLabel_(via || 'api') });
+  return appendLog_('審計紀錄', {
+    id: uid_('au'), at: stamp_(), actor: redactMeta_(sanitizeLabel_(actor)), role: sanitizeLabel_(role_()),
+    identity: sanitizeLabel_(identity_()), branchId: sanitizeLabel_(branch_()),
+    action: String(action || '').slice(0, 40), target: redactMeta_(String(target || '').slice(0, 120)),
+    detail: redactMeta_(String(detail || '').slice(0, 400)), via: sanitizeLabel_(via || 'api')
+  });
 }
 function access_(kind, email, ip, meta) {
-  return appendLog_('操作紀錄', { id: uid_('ac'), at: stamp_(), kind: String(kind || '').slice(0, 20), email: sanitizeLabel_(email || ''), ip: sanitizeLabel_(ip || ''), meta: String(meta || '').slice(0, 200) });
+  return appendLog_('操作紀錄', {
+    id: uid_('ac'), at: stamp_(), kind: String(kind || '').slice(0, 20),
+    email: redactMeta_(sanitizeLabel_(email || '')), ip: sanitizeLabel_(ip || ''), meta: redactMeta_(String(meta || '').slice(0, 200))
+  });
 }
 function sync_(mode, tables, version, confirmed, ms) {
   return appendLog_('同步紀錄', { id: uid_('sy'), at: stamp_(), mode: String(mode || '').slice(0, 20), tables: String(tables || '').slice(0, 200), version: String(version || ''), confirmed: confirmed ? 'true' : 'false', ms: String(ms || '') });

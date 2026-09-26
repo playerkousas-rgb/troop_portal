@@ -5,6 +5,18 @@
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
+/* ★ 紀錄只記 metadata（同 GAS `redactMeta_` 同一套規則）：email 遮、
+   電話遮、長文字唔記內容（只記長度）。審計係追蹤用，唔係內容備份。 */
+export const LOG_META_MAX = 80;
+export function redactMeta(v) {
+  let t = String(v == null ? '' : v);
+  if (!t) return '';
+  t = t.replace(/[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g, m => m.slice(0, 2) + '…@' + m.split('@')[1]);
+  t = t.replace(/(?:\+?852[\s-]?)?\b(\d{4})[\s-](\d{4})\b/g, (m, a, b) => '****-' + b);
+  if (t.length > LOG_META_MAX) return `[內容不記錄 len=${t.length}]`;
+  return t;
+}
+
 export function esc(v) {
   return String(v == null ? '' : v)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
