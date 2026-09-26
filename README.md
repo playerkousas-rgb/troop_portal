@@ -19,10 +19,12 @@
 
 ```bash
 npm run dev        # → http://localhost:8080/
-npm run check      # lint + 旅 GAS 本機測試（53）+ /api 測試（27）+ jsdom smoke（93）
+npm run check      # lint + 旅 GAS 本機測試（53）+ /api 測試（27）+ jsdom smoke（95）
 npm run preflight  # 上線前檢查：env 齊唔齊、部署體積、私隱（只報變數名，唔會印值）
 ```
 
+> 需要 **Node ≥ 22**（`jsdom` 30 嘅 engines 係 `^22.22.2`；用 Node 20 會喺 undici 直接 TypeError，
+> smoke 一步都跑唔到）。本機／CI 版本要對得上，smoke 有測試釘死。
 > 後端兩層：**旅 SHEET**（`apps-script/Code.gs`）＋**平台**（`api/proxy`／`auth`／`super`／`units`／`downstreams`／`troop`／`registry`／`member-entry`／`share`／`push`）；
 > 下游（團側）範本：`apps-script/Downstream.gs`；推送接收端：`sw.js`；CI：`.github/workflows/check.yml`。
 > 本機測試係假環境（唔會連真 Sheet／真 Vercel）—— **真環境要人手跑一次**，清單見部署步驟 §5。

@@ -230,7 +230,10 @@ for (const f of jsFiles.filter(f => f.includes('assets/js'))) {
 
 /* ---------- 7. 體積治理 ---------- */
 let total = 0, biggest = ['', 0];
-for (const f of [...jsFiles, ...cssFiles, ...htmlFiles, ...all.filter(f => f.includes('assets/vendor'))]) {
+/* ★ 只計真正落 deploy 嘅程式碼檔（js／css／html）：vendor 嘅 .js 本身已經喺 jsFiles 入面，
+   之前嗰句 `all.filter(f => f.includes('assets/vendor'))` 會令 qrcode.js（55 KB）計兩次之餘，
+   連 vendor 嘅 README.md 都入埋體積。 */
+for (const f of new Set([...jsFiles, ...cssFiles, ...htmlFiles])) {
   const s = statSync(f).size;
   total += s;
   if (s > biggest[1]) biggest = [rel(f), s];
