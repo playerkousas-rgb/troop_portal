@@ -29,7 +29,7 @@ var LINK_SIG_PURPOSE = 'troopportal-troop-sig-v1';
 var SUPER_VERIFY_URL = 'https://troop-portal.vercel.app/api/super';
 
 /** 每次寫入上限（B／D 唔落 Sheet，所以只係防呆） */
-var LIMITS = { body: 900 * 1024, rowsPerWrite: 20000, importRows: 2000, loginFails: 5, lockMs: 15 * 60 * 1000, sigSkewMs: 5 * 60 * 1000, anonWrites: 3, anonWindowSec: 3600 };
+var LIMITS = { body: 900 * 1024, rowsPerWrite: 20000, importRows: 2000, loginFails: 5, lockMs: 15 * 60 * 1000, sigSkewMs: 5 * 60 * 1000, anonWrites: 3, anonWindowSec: 3600, sigJtiRing: 200 };
 
 /** 匿名可寫面（BUILD §3／§10-5）：**只可以 append、有數量上限、寫入待批表**；其他一律要 apikey／sig
     通告報名（同通告同人去重）／物資借用／收支申報／進度申報／開戶申請／求救 */
@@ -623,7 +623,12 @@ function verifySig_(action, rawBody, params, body) {
   if (params.sig_nonce) consumed.push(params.sig_nonce);
   if (body.sig_nonce && body.sig_nonce !== params.sig_nonce) consumed.push(body.sig_nonce);
   var c = cache_();
-  for (var i = 0; i < consumed.length; i++) { if (c.get('sn_' + consumed[i])) return { ok: false, msg: 'nonce 已用過（防重放）' }; }
+  var jtis = consumed.map(function (n) { return jtiOf_(n, t); });
+  for (var i = 0; i < consumed.length; i++) {
+    if (c.get('sn_' + consumed[i])) return { ok: false, code: 'sig_replayed', jti: jtis[i], msg: 'nonce 已用過（防重放）' };
+    /* 持久環：cache 蒸發咗都照樣擋得住重放 */
+    if (jtiSeen_(jtis[i])) return { ok: false, code: 'sig_replayed', jti: jtis[i], msg: 'jti 已用過（防重放；cache 蒸發都擋得住）' };
+  }
   /* digest：query 綁完整原始 body；body 通道綁去掉 sig 三欄之後嘅 body */
   var payloadForBody = JSON.parse(JSON.stringify(body)); delete payloadForBody.sig; delete payloadForBody.sig_ts; delete payloadForBody.sig_nonce;
   var digestQuery = sha256Hex_(rawBody);
@@ -636,8 +641,43 @@ function verifySig_(action, rawBody, params, body) {
   var sigKey = sha256Hex_(LINK_SIG_PURPOSE + '|' + myKey);       // 本機一條 purpose（下游側照自己常數驗）
   var expect = bytesToHex_(Utilities.computeHmacSha256Signature(canonical, sigKey));
   if (expect !== sig) return { ok: false, msg: '簽名不符' };
-  consumed.forEach(function (n) { c.put('sn_' + n, '1', 600); });
-  return { ok: true, via: fromQuery ? 'query' : 'body' };
+  consumed.forEach(function (n, k) {
+    c.put('sn_' + n, '1', 600);                     // 快路：10 分鐘
+    jtiRemember_(jtis[k], t);                        // 持久環：cache 冇咗都認得出
+  });
+  return { ok: true, via: fromQuery ? 'query' : 'body', jti: jtis[0] };
+}
+
+/* ★ sig jti（BUILD §10 條 7）：nonce 就係 jti，但 cache 只係「盡力而為」——
+   蒸發咗就等於防重放冇咗。所以再做一個**持久** jti 環（ScriptProperties，有上限＋會過期），
+   cache 快路 + 持久環雙保險：同一張簽名用第二次一定拒。 */
+var SIG_JTI_RING_KEY = 'SIG_JTI_RING';
+function jtiOf_(nonce, ts) { return sha256Hex_('jti|' + String(nonce) + '|' + String(ts)).slice(0, 24); }
+function jtiRingRead_() {
+  var raw = props_().getProperty(SIG_JTI_RING_KEY) || '[]';
+  var arr = [];
+  try { arr = JSON.parse(raw); } catch (e) { arr = []; }
+  if (!Array.isArray(arr)) arr = [];
+  var cut = now_().getTime() - (LIMITS.sigSkewMs * 2);
+  return arr.filter(function (x) { return x && Number(x.ts) >= cut; });        // 過期即自然淘汰
+}
+function jtiSeen_(jti) {
+  var ring = jtiRingRead_();
+  for (var i = 0; i < ring.length; i++) { if (String(ring[i].jti) === String(jti)) return true; }
+  return false;
+}
+function jtiRemember_(jti, ts) {
+  var ring = jtiRingRead_();
+  ring.push({ jti: String(jti), ts: Number(ts) || now_().getTime() });
+  var max = LIMITS.sigJtiRing || 200;
+  if (ring.length > max) ring = ring.slice(ring.length - max);                 // 有上限：唔會無限長大
+  try { props_().setProperty(SIG_JTI_RING_KEY, JSON.stringify(ring)); } catch (e) { /* 寫唔入都唔可以擋住請求；cache 快路仍在 */ }
+  return ring.length;
+}
+/** 測試／管理用：睇 jti 環現況 */
+function jtiRingInfo_() {
+  var ring = jtiRingRead_();
+  return { count: ring.length, oldest: ring.length ? ring[0].ts : 0 };
 }
 
 /** 中央登入票據回打固定端點（一次性防重放；60 秒） */
@@ -1143,7 +1183,7 @@ function doPost(e) {
       CTX.mode = 'server'; CTX.actor = '（server）'; clearFails_(CTX.ip);
     } else if (body.sig || params.sig) {
       var v = verifySig_(action, rawBody, params, body);
-      if (!v.ok) { bumpFail_(CTX.ip); access_('SIG_FAIL', '', CTX.ip, action + '：' + v.msg); return ContentService.createTextOutput(json_(err_('bad_sig', v.msg))).setMimeType(ContentService.MimeType.JSON); }
+      if (!v.ok) { bumpFail_(CTX.ip); access_('SIG_FAIL', '', CTX.ip, action + '：' + v.msg + (v.jti ? ('｜jti=' + v.jti.slice(0, 8)) : '')); return ContentService.createTextOutput(json_(err_('bad_sig', v.msg))).setMimeType(ContentService.MimeType.JSON); }
       CTX.mode = 'upstream'; CTX.actor = 'upstream'; clearFails_(CTX.ip);
     } else if (ANON_WRITE_ACTIONS.indexOf(action) >= 0) {
       /* 純邀請制：自助申請一律唔收（開戶申請） */

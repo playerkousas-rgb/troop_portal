@@ -901,6 +901,46 @@ t('紀錄只記 metadata：內容唔入 log、email／電話遮住，但審計�
   assert(/\[內容不記錄 len=\d+\]/.test(String(ac[ac.length - 1].meta)), 'ACCESS_LOG 長 meta 唔記內容');
 });
 
+/* ㉓ sig jti：一次性（持久環），cache 蒸發都擋得住重放；環有上限、會自然淘汰 */
+t('sig jti：cache 蒸發都擋得住重放；環有上限、過期自動淘汰', () => {
+  /* 用同一個 sandbox（要留住 ScriptProperties 嘅 jti 環），但 cache 可以清 */
+  const { G, props, cache } = makeSandbox();
+  G.initializeSheets();
+  const mk = () => {
+    const body = { action: 'load', table: '支部' };
+    const sig = G.signOutgoing_('load', body, G.LINK_SIG_PURPOSE, G.apiKey_());
+    return { ...body, ...sig };
+  };
+  const one = mk();
+  const ok1 = call(G, one);
+  assert(ok1.success === true, '正常簽名要通：' + JSON.stringify(ok1).slice(0, 100));
+  assert(G.jtiRingInfo_().count >= 1, '通過之後要記落持久 jti 環');
+
+  /* ★ 清走快路（cache）＝ 模擬 cache 到期／被蒸發 → 重放仍然要拒 */
+  cache.clear();
+  const again = call(G, one);
+  assert(again.success === false, '★ cache 清咗就通得？持久環冇用');
+  assert(/jti 已用過/.test(again.error) || /nonce 已用過/.test(again.error), '要話明係重放：' + again.error);
+
+  /* 每次通過都入環，但環有上限（唔會無限長大） */
+  for (let i = 0; i < 5; i++) { const r = call(G, mk()); assert(r.success === true, '第 ' + (i + 2) + ' 次簽名要通'); }
+  const info = G.jtiRingInfo_();
+  assert(info.count <= G.LIMITS.sigJtiRing, '環唔可以長過上限');
+  assert(info.count >= 6, '每次通過都要入環（而家 ' + info.count + ' 筆）');
+
+  /* 過期嘅會自動淘汰：前推到 ±2×skew 之前 */
+  const ring = JSON.parse(props.get('SIG_JTI_RING'));
+  ring.forEach(x => { x.ts = Date.now() - G.LIMITS.sigSkewMs * 3; });
+  props.set('SIG_JTI_RING', JSON.stringify(ring));
+  eq(G.jtiRingInfo_().count, 0, '過期 jti 要自動淘汰（唔會累積到天光）');
+
+  /* jti 係 nonce 衍生：唔會將 nonce 原文寫落持久區（只記 hash 前 24 位） */
+  const r2 = call(G, mk());
+  const ring2 = JSON.parse(props.get('SIG_JTI_RING'));
+  assert(r2.success === true && ring2.length === 1, '新一筆要入環');
+  assert(/^[0-9a-f]{24}$/.test(String(ring2[0].jti)), 'jti 要係 24 位 hex 摘要（唔係 raw nonce）：' + ring2[0].jti);
+});
+
 /* 收尾 */
 console.log('');
 if (fails.length) {

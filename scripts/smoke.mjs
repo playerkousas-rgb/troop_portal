@@ -1565,6 +1565,20 @@ await test('★ 同步引擎：三色燈＋樂觀鎖＋merge3 逐格問（示範
   S.resetDemo();
 });
 
+await test('★ sig jti：一次性簽名有持久環（cache 蒸發都擋得住）；GAS 源碼釘死', async () => {
+  const gas = readFileSync(join(ROOT, 'apps-script/Code.gs'), 'utf8');
+  assert(/function jtiOf_/.test(gas), '要有 jti 衍生（nonce → 摘要）');
+  assert(/function jtiSeen_/.test(gas) && /function jtiRemember_/.test(gas), '要有持久環：查 ＋ 記');
+  assert(/SIG_JTI_RING_KEY/.test(gas) && /setProperty\(SIG_JTI_RING_KEY/.test(gas), 'jti 環要寫落 ScriptProperties（持久，唔止 cache）');
+  assert(/sigJtiRing: 200/.test(gas), '環要有上限（唔會無限長大）');
+  assert(/sig_replayed/.test(gas), '重放要回穩定 error code（sig_replayed）');
+  assert(/jti:\s*jtis\[0\]/.test(gas) || /jti: jtis\[0\]/.test(gas), '成功驗簽要回 jti（方便追）');
+  /* 兩道閘都要喺驗簽**之前**，而且 cache 快路同持久環並存 */
+  const ver = gas.slice(gas.indexOf('function verifySig_'), gas.indexOf('function jtiRingRead_'));
+  assert(/c\.get\('sn_' \+ consumed\[i\]\)/.test(ver) && /jtiSeen_\(jtis\[i\]\)/.test(ver), 'cache ＋ 持久環兩道閘都要查');
+  assert(ver.indexOf('jtiSeen_') < ver.indexOf('computeHmacSha256Signature'), '重放檢查要喺計簽名之前（唔會做白工）');
+});
+
 await test('★ 紀錄只記 metadata：內容唔入審計（只記長度）、email／電話遮住、UI 講明白', async () => {
   const U = await import('../assets/js/lib/util.js');
 
