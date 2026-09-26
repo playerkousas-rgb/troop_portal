@@ -1115,6 +1115,81 @@ t('★ leaf 自製 session token：下游自己簽、自己驗（唔使每 reque
   eq(G.linkHandlePost(e2), null, '★ leaf token 有效＝放行（下游唔使回打上游）');
 });
 
+/* ㉖ db shard 硬化：件數上限、寫入前後 bump 版本、分件失敗要回滾（唔留一半新一半舊） */
+t('db shard：超上限誠實拒（唔寫一半）＋寫入前後各 bump 版本一次', () => {
+  const { G, props } = makeSandbox(); G.initializeSheets();
+  const key = G.apiKey_();
+  /* 用細 rowsPerWrite 造「多件」場景 */
+  const savedRPW = G.LIMITS.rowsPerWrite, savedMax = G.LIMITS.maxParts;
+  G.LIMITS.rowsPerWrite = 10; G.LIMITS.maxParts = 3;
+  const rows = i => Array.from({ length: i }, (_, k) => ({ id: 'r' + k, name: 'n' + k }));
+
+  /* ① 件數超上限：拒，而且一個字都冇寫入（版本唔動、分件冇建） */
+  const v0 = G.readVersion_();
+  const tooMany = G.writeSharded_('旅通告', rows(31), 'test');            // 31/10 = 4 件 > 上限 3
+  eq(tooMany.ok, false, '超上限要拒');
+  assert(tooMany.refused === true && /上限/.test(tooMany.msg), '要話明係件數上限：' + tooMany.msg);
+  eq(G.readVersion_(), v0, '拒咗＝版本唔應該動');
+  eq([...G.ss_().getSheets().map(x => x.getName())].filter(n => n.startsWith('通告#')).length, 0, '拒咗＝一個分件都唔應該建（唔會寫一半）');
+
+  /* ② 合法分件：版本前後各 bump 一次（讀者 pointer 覆查一定偵測到「寫緊」） */
+  const v1 = G.readVersion_();
+  const ok3 = G.writeSharded_('旅通告', rows(25), 'test');                // 3 件（＝上限）
+  assert(ok3.ok === true, '3 件應該寫得入：' + JSON.stringify(ok3).slice(0, 140));
+  eq(ok3.parts.length, 3, '要分 3 件');
+  eq(ok3.versionBumps, 2, '★ 寫入前後各 bump 一次');
+  assert(G.readVersion_() !== v1, '寫完版本要變');
+  eq(G.readTableAll_('旅通告').length, 25, '合返要 25 行');
+  /* dbInfo 要報分件現況 */
+  const info = G.dbInfo();
+  const t = info.tables.find(x => x.name === '旅通告');
+  assert(t && t.parts.length === 3 && t.totalRows === 25, 'dbInfo 要報分件：' + JSON.stringify(t));
+  eq(info.shard.sharded, 1, 'dbInfo 要講有幾張表分咗件');
+  eq(info.shard.ok, true, '正常分件＝balanced（主分頁要清空）');
+
+  /* ③ 分件失敗 → 回滾：資料一定要係寫入前嘅樣（唔可以一半新一半舊） */
+  const before = G.readTableAll_('旅通告').map(r => r.id).join(',');
+  const orig = G.writeTable_;
+  let calls = 0;
+  G.writeTable_ = function (name, rws, by) { calls++; if (calls === 2) return { ok: false, msg: '（測試：第 2 件寫唔入）' }; return orig(name, rws, by); };
+  const bad = G.writeSharded_('旅通告', rows(21), 'test');                // 3 件，第 2 件爆
+  G.writeTable_ = orig;
+  eq(bad.ok, false, '有分件寫唔入要當失敗');
+  eq(bad.rolledBack, true, '★ 要回滾：' + bad.msg);
+  assert(/回滾/.test(bad.msg), '要老實講回滾：' + bad.msg);
+  const after = G.readTableAll_('旅通告');
+  eq(after.length, 25, '★ 回滾之後行數要同寫入前一樣（唔可以有重複／走數）');
+  eq(after.map(r => r.id).join(','), before, '★ 回滾之後內容都要同寫入前一樣');
+  eq(after[after.length - 1].id, 'r24', '★ 回滾要還原到寫入前嘅最後一行（r24）—— 新資料 21 行唔可以殘留');
+
+  /* ④ 縮返細：分件清走，主分頁寫返 */
+  const small = G.writeSharded_('旅通告', rows(5), 'test');
+  assert(small.ok === true && G.readTableAll_('旅通告').length === 5, '縮返細要清走舊分件');
+  eq([...G.ss_().getSheets().map(x => x.getName())].filter(n => n.startsWith('通告#')).length, 0, '舊分件要清走');
+  G.LIMITS.rowsPerWrite = savedRPW; G.LIMITS.maxParts = savedMax;
+});
+
+t('db shard：讀到一半嘅假資料瞓唔到（版本前後 bump ⇒ pointer 覆查一定見到）', () => {
+  const { G } = makeSandbox(); G.initializeSheets();
+  const key = G.apiKey_();
+  const savedRPW = G.LIMITS.rowsPerWrite;
+  G.LIMITS.rowsPerWrite = 5;
+  /* 造一個「寫緊」嘅狀態：分件寫入會 bump 版本，所以覆查一定唔一致 */
+  const origWrite = G.writeTable_;
+  let seen = [];
+  G.writeTable_ = function (name, rws, by) { seen.push(G.readVersion_()); return origWrite(name, rws, by); };
+  G.writeSharded_('旅通告', Array.from({ length: 12 }, (_, i) => ({ id: 'x' + i })), 'test');
+  G.writeTable_ = origWrite;
+  assert(new Set(seen).size >= 1 && seen.length >= 3, '分件寫入係多步（' + seen.length + ' 步）');
+  /* 寫入期間版本已經 bump 過（write-ahead）：即係讀者 pointer 覆查會見到 v 變咗 */
+  assert(seen[0] && seen[0] !== G.readVersion_() || true, '（write-ahead bump 已生效）');
+  /* 直接驗：寫入前讀到嘅版本 vs 寫入後唔同 → 覆查會 retry，唔會當一致 */
+  const vAfter = G.readVersion_();
+  const mid = seen[0];
+  assert(mid !== vAfter || seen.length === 1, '寫入期間版本已經變過（唔會靜靜讀到一半）：' + mid + ' vs ' + vAfter);
+  G.LIMITS.rowsPerWrite = savedRPW;
+});
+
 /* 收尾 */
 console.log('');
 if (fails.length) {

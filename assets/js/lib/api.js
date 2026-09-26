@@ -155,6 +155,16 @@ export async function importTransferBundle(payload) {
   return jfetch('/api/proxy', { action: 'importTransferBundle', unit: unitId(), payload });
 }
 /* ------------------------- P6b：家長子女綁定（要該團領袖確認） ------------------------- */
+/* 後端實況（系統 → 後端）：status／dbInfo 都係讀取，會如實報分件現況 */
+export async function dbInfo() {
+  const g = guard(); if (g) return g;
+  return jfetch('/api/proxy', { action: 'dbInfo', unit: unitId(), payload: {} });
+}
+export async function backendStatus() {
+  const g = guard(); if (g) return g;
+  return jfetch('/api/proxy', { action: 'status', unit: unitId(), payload: {} });
+}
+
 export async function bindChild(payload) {
   const g = guard(); if (g) return g;
   return jfetch('/api/proxy', { action: 'bindChild', unit: unitId(), payload });

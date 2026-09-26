@@ -29,7 +29,7 @@ var LINK_SIG_PURPOSE = 'troopportal-troop-sig-v1';
 var SUPER_VERIFY_URL = 'https://troop-portal.vercel.app/api/super';
 
 /** 每次寫入上限（B／D 唔落 Sheet，所以只係防呆） */
-var LIMITS = { body: 900 * 1024, rowsPerWrite: 20000, importRows: 2000, loginFails: 5, lockMs: 15 * 60 * 1000, sigSkewMs: 5 * 60 * 1000, anonWrites: 3, anonWindowSec: 3600, sigJtiRing: 200 };
+var LIMITS = { body: 900 * 1024, rowsPerWrite: 20000, importRows: 2000, loginFails: 5, lockMs: 15 * 60 * 1000, sigSkewMs: 5 * 60 * 1000, anonWrites: 3, anonWindowSec: 3600, sigJtiRing: 200, maxParts: 40 };
 
 /** 匿名可寫面（BUILD §3／§10-5）：**只可以 append、有數量上限、寫入待批表**；其他一律要 apikey／sig
     通告報名（同通告同人去重）／物資借用／收支申報／進度申報／開戶申請／求救 */
@@ -354,22 +354,70 @@ function dropParts_(name) {
   });
   return gone;
 }
-/** 大庫寫入：超上限就自動切件（每件 ≤rowsPerWrite） */
+/** 切件（寫入同回滾共用同一套切法，唔會前後唔一致） */
+function chunksOf_(rows) {
+  var out = [];
+  for (var i = 0; i < rows.length; i += LIMITS.rowsPerWrite) out.push(rows.slice(i, i + LIMITS.rowsPerWrite));
+  return out.length ? out : [[]];
+}
+/** 刪走某個分件（刪唔到就清空，唔留垃圾） */
+function dropPartSheet_(pn, by) {
+  var sh = ss_().getSheetByName(pn);
+  if (!sh) return true;
+  try { ss_().deleteSheet(sh); return true; } catch (e) { try { writeTable_(pn, [], by); return true; } catch (e2) { return false; } }
+}
+/** 回滾：寫返寫入前嘅樣（分件數同舊 snapshot 對齊，多咗嘅分件清走） */
+function restoreShard_(name, rows, by) {
+  var chunks = chunksOf_(rows), ok = true;
+  for (var i = 0; i < chunks.length; i++) {
+    var w = (rows.length <= LIMITS.rowsPerWrite)
+      ? writeTable_(name, chunks[0], by)                       // 舊資料本身唔夠大：寫返主分頁
+      : writeTable_(partName_(name, i + 1), chunks[i], by);
+    if (!w.ok) ok = false;
+  }
+  if (rows.length > LIMITS.rowsPerWrite) { var w0 = writeTable_(name, [], by); if (!w0.ok) ok = false; }
+  /* 今次寫多咗嘅分件：刪走（舊 snapshot 冇咁多件） */
+  partSheets_(name).forEach(function (pn) {
+    if (Number(pn.slice((name + '#').length)) > chunks.length) { if (!dropPartSheet_(pn, by)) ok = false; }
+  });
+  return { ok: ok, msg: ok ? '已回滾到寫入前（資料冇變）' : '⚠️ 回滾都失敗 —— 請即刻由備份匯入' };
+}
+/**
+ * 大庫寫入（db shard）：超上限就自動切件（每件 ≤rowsPerWrite）。
+ * ★ 三個保障：
+ *   ① 件數上限（LIMITS.maxParts）—— 超出＝誠實拒，**唔會寫一半**
+ *   ② 寫入前後各 bump 版本一次 —— 讀者嘅 pointer 覆查一定偵測到「寫緊」（唔會讀到一半）
+ *   ③ 有分件寫唔入＝**回滾**返寫入前嘅樣（唔會留一半新一半舊俾人讀出假資料）
+ */
 function writeSharded_(name, rows, by) {
   if (rows.length <= LIMITS.rowsPerWrite) {
     dropParts_(name);                                                      // 縮返細：清走＋刪走舊分件
     return writeTable_(name, rows, by);
   }
-  var parts = [];
-  for (var i = 0; i < rows.length; i += LIMITS.rowsPerWrite) parts.push(rows.slice(i, i + LIMITS.rowsPerWrite));
-  var rep = { ok: true, rows: rows.length, parts: [] };
-  for (var j = 0; j < parts.length; j++) {
-    var w = writeTable_(partName_(name, j + 1), parts[j], by);
-    rep.parts.push({ part: j + 1, ok: w.ok, rows: parts[j].length, msg: w.msg });
-    if (!w.ok) rep.ok = false;
+  var chunks = chunksOf_(rows);
+  if (chunks.length > (LIMITS.maxParts || 40)) {
+    return { ok: false, rows: rows.length, parts: [], chunks: chunks.length, refused: true,
+      msg: '要分 ' + chunks.length + ' 件（上限 ' + (LIMITS.maxParts || 40) + '）—— 請先歸檔舊資料（匯出 → purge），今次一個字都冇寫' };
+  }
+  bumpVersion_();                                                          // ② 寫入前（write-ahead）
+  var snapshot = readTableAll_(name);                                      // ③ 回滾用
+  var rep = { ok: true, rows: rows.length, parts: [], snapshotRows: snapshot.length, versionBumps: 1 };
+  for (var j = 0; j < chunks.length; j++) {
+    var w = writeTable_(partName_(name, j + 1), chunks[j], by);
+    rep.parts.push({ part: j + 1, ok: w.ok, rows: chunks[j].length, msg: w.msg });
+    if (!w.ok) { rep.ok = false; break; }
   }
   if (rep.ok) { var w0 = writeTable_(name, [], by); if (!w0.ok) { rep.ok = false; rep.msg = w0.msg; } }   // 主分頁清空（真相＝分件）
-  rep.msg = rep.ok ? '已分 ' + parts.length + ' 件寫入' : '有分件寫唔入';
+  if (!rep.ok) {
+    var rb = restoreShard_(name, snapshot, by);
+    rep.rolledBack = rb.ok; rep.rollbackMsg = rb.msg;
+    if (!rb.ok) access_('SHARD_ROLLBACK_FAIL', '', CTX.ip, name + '：' + rb.msg);
+    rep.msg = '有分件寫唔入 —— ' + rb.msg;
+    return rep;
+  }
+  bumpVersion_();                                                          // ② 寫完（write-behind）
+  rep.versionBumps = 2;
+  rep.msg = '已分 ' + chunks.length + ' 件寫入（版本前後各 bump 一次：讀者唔會讀到一半）';
   return rep;
 }
 
@@ -989,10 +1037,33 @@ function listModules_() { return readTable_('模組開關'); }
 
 /* --------------------------- 後端實況 ------------------------------------ */
 function dbInfo() {
-  var info = { app: APP, unit: unitId_(), spread: ss_().getName(), tables: [], rows: 0, broken: [], chain: null, properties: { downstreams: getDownstreams().length, apiKey: !!apiKey_() } };
+  var info = {
+    app: APP, unit: unitId_(), spread: ss_().getName(), tables: [], rows: 0, broken: [], chain: null,
+    /* ★ db shard 現況：邊幾張表分咗件、每件幾行（大庫睇得到，唔使打開 Sheet 數） */
+    shard: { maxParts: LIMITS.maxParts || 40, rowsPerWrite: LIMITS.rowsPerWrite, sharded: 0, shards: 0, largest: null, unbalanced: [] },
+    properties: { downstreams: getDownstreams().length, apiKey: !!apiKey_() }
+  };
   TABLES.concat(Object.keys(LOGS)).forEach(function (t) {
-    try { var sh = ss_().getSheetByName(t); if (!sh) { info.broken.push(t + '：冇分頁'); return; } var n = Math.max(0, sh.getLastRow() - 1); info.tables.push({ name: t, rows: n }); info.rows += n; } catch (e) { info.broken.push(t + '：' + e); }
+    try {
+      var sh = ss_().getSheetByName(t);
+      if (!sh) { info.broken.push(t + '：冇分頁'); return; }
+      var n = Math.max(0, sh.getLastRow() - 1);
+      var parts = partSheets_(t).map(function (pn) {
+        var p = ss_().getSheetByName(pn);
+        return { name: pn, rows: p ? Math.max(0, p.getLastRow() - 1) : 0 };
+      });
+      var total = n + parts.reduce(function (a, p) { return a + p.rows; }, 0);
+      info.tables.push({ name: t, rows: n, parts: parts, totalRows: total });
+      info.rows += total;
+      if (parts.length) {
+        info.shard.sharded += 1; info.shard.shards += parts.length;
+        if (!info.shard.largest || total > info.shard.largest.rows) info.shard.largest = { name: t, rows: total, parts: parts.length };
+        /* 唔平衡：有分件但主分頁仲有嘢（分件寫入應該清空主分頁） */
+        if (n > 0) info.shard.unbalanced.push(t + '：主分頁仲有 ' + n + ' 行（分件寫入應該清空）');
+      }
+    } catch (e) { info.broken.push(t + '：' + e); }
   });
+  info.shard.ok = info.shard.unbalanced.length === 0;
   info.chain = verifyAuditChain_();
   return info;
 }

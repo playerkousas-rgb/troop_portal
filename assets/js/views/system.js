@@ -119,11 +119,20 @@ export function render(el, params, query = {}) {
     </div>
     ${card({ title: '診斷與修復（搶救三寶精神）', body: `
       <div class="btn-row">
+        <button class="btn sm primary" data-live-diag>${icon('refresh', 13)} 真後端檢查（status ＋ dbInfo）</button>
         <button class="btn sm" data-diag>${icon('refresh', 13)} 後端資料檢查（diag）</button>
         <button class="btn sm" data-repair>${icon('wrench', 13)} 修復後端（清垃圾／舊版本段）</button>
         <button class="btn sm danger" data-force>強制用呢部機嘅資料上載</button>
       </div>
-      <div class="xs faint mt-8">三個都係真模式先有意義；示範模式只會回應示範結果。</div>` })}
+      <div class="xs faint mt-8">四個都係真模式先有意義；示範模式只會回應示範結果（唔會假裝連到）。</div>` })}
+    ${card({ title: '★ db shard（大庫分件）', sub: 'BUILD §10 條 7：件數上限／寫入前後各 bump 版本／分件失敗會回滾', body: `
+      <div class="steps">
+        <div class="step">一張表過 <span class="mono">rowsPerWrite</span> 行就會自動切件（<span class="mono">表#1</span>、<span class="mono">表#2</span>…），讀嘅時候自動合返</div>
+        <div class="step">件數有上限（<span class="mono">maxParts</span>）—— 超出＝<b>誠實拒</b>，唔會寫一半；請先匯出歸檔再 purge</div>
+        <div class="step">分件寫入前後<b>各 bump 版本一次</b> ⇒ 讀者嘅 pointer 覆查一定偵測到「寫緊」，唔會讀到一半</div>
+        <div class="step">有任何一件寫唔入 ⇒ <b>回滾</b>返寫入前嘅樣（唔會留一半新一半舊俾人讀出假資料）</div>
+      </div>
+      <div class="btn-row mt-8"><button class="btn sm" data-live-diag2>${icon('search', 13)} 睇真後端分件現況</button></div>` })}
     ${card({ title: '逐表寫入（saveTables）— 點解要咁做', body: `
       <div class="steps">
         <div class="step">只寫<b>有改過</b>嗰幾個表（唔係成份資料庫一鋪過寫）</div>
@@ -339,6 +348,42 @@ export function render(el, params, query = {}) {
     });
     toast('已更新（指定支部）', 'ok');
   }));
+  /* ★ 真後端檢查：真模式打 status ＋ dbInfo（如實報分件現況）；示範模式零 fetch、老實講 */
+  const liveDiag = async () => {
+    if (!API.isLive()) {
+      return modal({
+        title: '真後端檢查（示範模式）',
+        body: `${notice('示範模式：唔會發任何請求 —— 所以呢度唔會假裝連到後端。要睇真，請喺真模式（有 <span class="mono">/api</span> 同旅 GAS）再撳。', 'warn')}`,
+        footer: `<button class="btn primary" onclick="this.closest('.mask').remove()">明白</button>`
+      });
+    }
+    const [st, di] = await Promise.all([API.backendStatus(), API.dbInfo()]);
+    const sh = di.ok ? (di.data?.shard || {}) : null;
+    return modal({
+      title: '真後端檢查（status ＋ dbInfo）',
+      body: `<div class="grid g2">
+        ${kv([['status', st.ok ? badge('連到後端', 'g', true) : badge('連唔到／被拒：' + esc(st.msg || st.code), 'r', true)],
+        ['app 版本', esc(String(st.data?.app || '—')) + ' · ' + esc(String(st.data?.version || '—'))],
+        ['表數', String(st.data?.tables ?? '—') + ' 個'],
+        ['ready', st.data?.ready ? badge('已設 apikey', 'g', true) : badge('未設 apikey', 'r', true)]])}
+        ${kv([['dbInfo', di.ok ? badge('通', 'g', true) : badge('連唔到／被拒：' + esc(di.msg || di.code), 'r', true)],
+        ['工作表', esc(String(di.data?.spread || '—'))],
+        ['總行數', String(di.data?.rows ?? '—') + ' 行'],
+        ['壞表', (di.data?.broken || []).length ? (di.data.broken || []).map(x => badge(x, 'r', true)).join(' ') : badge('冇', 'g', true)],
+        ['審計鏈', di.data?.chain?.ok ? badge('完好', 'g', true) : badge(String(di.data?.chain?.msg || '驗唔到'), 'r', true)]])}
+      </div>
+      ${sh ? `<div class="mt-12">${kv([
+        ['分件（db shard）', sh.ok === false ? badge('⚠️ 唔平衡', 'r', true) : (sh.sharded ? badge(sh.sharded + ' 張表分咗件 · 共 ' + sh.shards + ' 件', 'y', true) : badge('未需要分件', 'g', true))],
+        ['最大表', sh.largest ? `${esc(sh.largest.name)}（${sh.largest.rows} 行 · ${sh.largest.parts} 件）` : '—'],
+        ['每件上限', String(sh.rowsPerWrite ?? '—') + ' 行／件 · 最多 ' + String(sh.maxParts ?? '—') + ' 件'],
+        ['唔平衡', (sh.unbalanced || []).length ? esc((sh.unbalanced || []).join('；')) : '冇']
+      ])}</div>` : ''}
+      ${(!st.ok && !di.ok) ? `<div class="mt-12">${notice('兩支都連唔到 —— 最常見原因：<b>未設 env</b>（旅 GAS URL／APIKEY 未入 Vercel）或者<b>未部署</b>。呢個時候唔好當「冇事」。', 'warn')}</div>` : ''}`,
+      footer: `<button class="btn primary" onclick="this.closest('.mask').remove()">閂</button>`
+    });
+  };
+  el.querySelector('[data-live-diag]')?.addEventListener('click', liveDiag);
+  el.querySelector('[data-live-diag2]')?.addEventListener('click', liveDiag);
   el.querySelector('[data-diag]')?.addEventListener('click', () => modal({
     title: '後端資料檢查（diag）',
     body: `<div class="mono-block">{

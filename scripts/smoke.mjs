@@ -1565,6 +1565,49 @@ await test('★ 同步引擎：三色燈＋樂觀鎖＋merge3 逐格問（示範
   S.resetDemo();
 });
 
+await test('★ db shard：真後端檢查掣（示範模式零 fetch／老實講）＋ GAS 源碼釘死三個保障', async () => {
+  /* ① UI：後端分頁有「真後端檢查」掣 ＋ db shard 卡 */
+  A.loginAs('u-chief');
+  main.boot();
+  fireHash(w, '#/system?tab=backend');
+  const t = text();
+  assert(/真後端檢查/.test(t), '後端分頁要有「真後端檢查」掣');
+  assert(/db shard/.test(t), '要有 db shard 卡');
+  assert(/件數上限|maxParts/.test(t), '要講件數上限');
+  assert(/回滾/.test(t), '要講分件失敗會回滾');
+  assert(/唔會讀到一半/.test(t), '要講寫入前後 bump 版本（pointer 覆查偵測得到）');
+  /* ② 示範模式：零 fetch，撳落去只老實講 */
+  let fetches = 0;
+  const of = globalThis.fetch;
+  globalThis.fetch = (...a) => { fetches++; return of(...a); };
+  document.querySelector('[data-live-diag]').click();
+  await new Promise(r => setTimeout(r, 40));
+  globalThis.fetch = of;
+  eq(fetches, 0, '★ 示範模式撳真後端檢查＝零 fetch');
+  const mask = document.querySelector('.mask');
+  assert(mask && /示範模式/.test(mask.textContent) && /唔會假裝連到後端/.test(mask.textContent), '要老實講（唔會假裝連到）');
+  document.querySelectorAll('.mask').forEach(m => m.remove());
+  /* ③ GAS 源碼：三個保障都要喺（唔可以只做 UI） */
+  const gas = readFileSync(join(ROOT, 'apps-script/Code.gs'), 'utf8');
+  assert(/maxParts: 40/.test(gas), '件數上限要喺 LIMITS');
+  assert(/refused: true/.test(gas) && /今次一個字都冇寫/.test(gas), '超上限要誠實拒（唔寫一半）');
+  assert(/function restoreShard_\(/.test(gas), '要有回滾函式');
+  const wa = gas.indexOf('bumpVersion_();');
+  const wa2 = gas.indexOf('bumpVersion_();', wa + 1);
+  assert(wa > 0 && wa2 > wa, '分件寫入前後各要 bump 一次（write-ahead ＋ write-behind）');
+  assert(gas.slice(wa, wa + 200).includes('readTableAll_(name)'), '寫入前要留 snapshot（回滾用）');
+  assert(/rep\.versionBumps = 2/.test(gas), '寫完要再 bump（write-behind）');
+  assert(/rolledBack/.test(gas), '要老實報回滾結果');
+  assert(/shard: \{ maxParts/.test(gas), 'dbInfo 要報分件現況');
+  /* ④ api.js 要有兩支（真模式先打） */
+  const api = readFileSync(join(ROOT, 'assets/js/lib/api.js'), 'utf8');
+  assert(/export async function dbInfo\(/.test(api) && /export async function backendStatus\(/.test(api), 'api.js 要有 dbInfo／backendStatus');
+  /* ⑤ /api/proxy 白名單 */
+  const proxy = readFileSync(join(ROOT, 'api/proxy.js'), 'utf8');
+  assert(/'dbInfo'/.test(proxy), 'proxy 白名單要有 dbInfo（讀取）');
+  S.resetDemo();
+});
+
 await test('★ 下游接入：範本齊（sig 驗簽／閂口／leaf token）＋支部頁指路＋教材 12', async () => {
   const ds = readFileSync(join(ROOT, 'apps-script/Downstream.gs'), 'utf8');
   /* ① 範本三件：驗上游簽名、直接入口掣、leaf 自製 session token */
