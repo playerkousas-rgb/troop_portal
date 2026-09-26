@@ -178,13 +178,18 @@ export function render(el, params, query = {}) {
     <div class="grid g3">
       ${stat({ k: '後端狀態', v: li.label, tone })}
       ${stat({ k: '未寫入改動', v: st.dirty || 0, u: '項', tone: st.dirty ? 'warn' : 'ok' })}
-      ${stat({ k: '本機隊列', v: qn, u: '筆', tone: qn ? 'warn' : 'ok' })}
+      ${stat({ k: '本機隊列', v: qn, u: '筆', tone: qn ? 'warn' : 'ok', hint: qn ? `下次自動重試：${SYNC.queueInfo().nextRetryMs ? Math.ceil(SYNC.queueInfo().nextRetryMs / 1000) + ' 秒後' : '夠鐘（一開機就試）'}` : '乾淨' })}
     </div>
     ${card({ title: '同步一次（樂觀鎖 ＋ merge3）', sub: 'BUILD §3：三路合併；同一格兩邊都改 → 唔會自動揀，逐格問你', body: `
       <div class="kv">
         <dt>基準版本</dt><dd class="mono">${esc(st.baseVersion || '（未對齊）')}</dd>
         <dt>上次成功</dt><dd>${st.lastAt ? esc(fmtStamp(new Date(st.lastAt).toISOString())) : '未試過'}</dd>
         <dt>上次錯誤</dt><dd>${st.lastError ? esc(String(st.lastError)) : '冇'}</dd>
+        <dt>下次自動重試</dt><dd>${(() => {
+        const qi = SYNC.queueInfo();
+        if (!qi.size) return '—';
+        return qi.due ? '夠鐘（一開機／回前景就送）' : `約 ${Math.ceil(qi.nextRetryMs / 1000)} 秒後（backoff＋jitter；試過 ${qi.tries} 次）`;
+      })()}</dd>
         <dt>上次寫入</dt><dd>${(st.lastWrote || []).length ? esc((st.lastWrote || []).join('、')) : '—'}</dd>
         <dt>上次逐格選擇</dt><dd>${st.lastConflictPicked ? `用我 ${st.lastConflictPicked.mine} 格／用佢 ${st.lastConflictPicked.theirs} 格` : '—'}</dd>
       </div>
@@ -197,7 +202,8 @@ export function render(el, params, query = {}) {
       <div class="xs faint mt-8">示範模式：零 fetch（唔會真連後端）；真模式經同源 <span class="mono">/api/proxy</span>，apikey 只喺 server 側注入。</div>` })}
     ${card({ title: '離線隊列（≤200 筆）', sub: '送唔到唔會跌：入本機隊列，backoff ＋ jitter 重試', body: (() => {
         const q = SYNC.queueSize();
-        return q ? `${notice(`本機仲有 ${q} 筆未送（最多 200 筆，滿咗就唔會再加 —— 唔會靜靜跌舊嘢）。`, 'warn')}
+        const qi = SYNC.queueInfo();
+        return q ? `${notice(`本機仲有 ${q} 筆未送（最多 200 筆，滿咗就唔會再加 —— 唔會靜靜跌舊嘢）。${qi.due ? '已經夠鐘：下次同步／開 APP 會自動送。' : `仲喺 backoff 中（約 ${Math.ceil(qi.nextRetryMs / 1000)} 秒後）—— 撳「即刻重試」可以人手優先。`}`, 'warn')}
           <div class="btn-row mt-8"><button class="btn sm" data-queue2>${icon('upload', 13)} 即刻重試</button></div>`
           : `<div class="empty">${icon('check', 22)}<div class="mt-8"><b>隊列乾淨</b></div><div class="sm faint mt-8">冇未送嘅改動。</div></div>`;
       })() })}`;
@@ -349,8 +355,8 @@ export function render(el, params, query = {}) {
   el.querySelector('[data-sync-batch]')?.addEventListener('click', () => runSync(el, 'batch'));
   [el.querySelector('[data-queue]'), el.querySelector('[data-queue2]')].forEach(b => b?.addEventListener('click', async () => {
     if (!API.isLive()) return toast('示範模式：唔會真送（隊列係真模式先有）', '');
-    const r = await SYNC.drainQueue();
-    toast(r.ok ? `已送走 ${r.sent} 筆` : `仲送唔到（${r.msg || r.code}）—— 留住 ${r.remaining ?? ''} 筆，等下次`, r.ok ? 'ok' : 'err');
+    const r = await SYNC.drainQueue({ force: true });           // 人手撳＝唔等 backoff
+    toast(r.ok ? `已送走 ${r.sent} 筆` : `仲送唔到（${r.msg || r.code}）—— 留住 ${r.remaining ?? ''} 筆，約 ${Math.ceil((r.nextRetryMs || 0) / 1000)} 秒後再試`, r.ok ? 'ok' : 'err');
     go('system?tab=sync');
   }));
   el.querySelector('[data-repair]')?.addEventListener('click', () => { S.audit('修復後端', d.unit.name, '示範：清舊版本段／垃圾行'); toast('修復完成（示範）：清 0 行垃圾、0 段舊版本', 'ok'); });

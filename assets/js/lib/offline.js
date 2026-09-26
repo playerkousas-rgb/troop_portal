@@ -163,7 +163,11 @@ export function backoffMs(n, { baseMs = RETRY.baseMs, capMs = RETRY.capMs, rand 
   const raw = Math.min(capMs, baseMs * Math.pow(2, Math.max(0, n - 1)));
   return Math.round(raw * (0.5 + rand() * 0.5));         // 50%~100% 抖動
 }
-export const isRetriable = code => ['busy', 'timeout', 'network', 'rate_limited'].includes(String(code));
+/* ★ 重試分類（BUILD §10 條 7）：連線／後端忙／被限流＝值得重試；
+   權限、規則、版本衝突（conflict 由同步邏輯自己處理）＝盲重試只會拖住用戶 */
+export const isRetriable = code => [
+  'busy', 'timeout', 'network', 'rate_limited', 'load_fail', 'save_fail', 'server_busy', 'overloaded'
+].includes(String(code));
 
 /**
  * 帶重試嘅執行器（唔會自己 fetch；caller 傳入做嘢嘅函式）
@@ -191,9 +195,29 @@ const K_QUEUE = 'troop.queue.v1';
 export function readQueue(storage = globalThis.localStorage) {
   try { return JSON.parse(storage.getItem(K_QUEUE) || '[]'); } catch { return []; }
 }
+export function saveQueue(q, storage = globalThis.localStorage) {
+  try { storage.setItem(K_QUEUE, JSON.stringify((Array.isArray(q) ? q : []).slice(-200))); } catch { /* 滿咗都唔可以爆 */ }
+  return readQueue(storage).length;
+}
 export function pushQueue(item, storage = globalThis.localStorage) {
-  const q = readQueue(storage); q.push({ ...item, at: item.at || new Date().toISOString() });
+  const q = readQueue(storage);
+  q.push({ tries: 0, nextAt: 0, ...item, at: item.at || new Date().toISOString() });
   storage.setItem(K_QUEUE, JSON.stringify(q.slice(-200)));         // 上限 200 筆
   return q.length;
 }
 export function clearQueue(storage = globalThis.localStorage) { storage.setItem(K_QUEUE, '[]'); }
+/** 邊幾筆「夠鐘試」：backoff 未夠鐘嘅唔會盲敲後端（省電、亦唔會夾埋一齊撞） */
+export function queueDue(queue = readQueue(), now = Date.now()) {
+  return (queue || []).filter(x => !x?.nextAt || Number(x.nextAt) <= Number(now));
+}
+/** 失敗一筆：tries＋1，下次重試時間＝now ＋ backoff（帶 jitter） */
+export function failQueueItem(item, { now = Date.now(), rand = Math.random } = {}) {
+  const tries = (Number(item?.tries) || 0) + 1;
+  return { ...item, tries, lastTryAt: new Date(now).toISOString(), nextAt: now + backoffMs(tries, { rand }) };
+}
+/** 距離下次自動重試仲有幾耐（毫秒；冇隊列＝0） */
+export function nextRetryIn(queue = readQueue(), now = Date.now()) {
+  const times = (queue || []).map(x => Number(x?.nextAt) || 0).filter(t => t > 0);
+  if (!times.length) return 0;
+  return Math.max(0, Math.min(...times) - Number(now));
+}

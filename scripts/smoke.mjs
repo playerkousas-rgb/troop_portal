@@ -1565,6 +1565,83 @@ await test('★ 同步引擎：三色燈＋樂觀鎖＋merge3 逐格問（示範
   S.resetDemo();
 });
 
+await test('★ backoff＋jitter 硬化：錯誤碼統一（讀寫同一套）＋讀取都會重試＋隊列記下次時間', async () => {
+  const SYNC = await import('../assets/js/lib/sync.js');
+  const OB = await import('../assets/js/lib/offline.js');
+  const API2 = await import('../assets/js/lib/api.js');
+
+  /* ① 錯誤碼統一：HTTP 狀態 → 穩定 code（唔靠 message 文字判斷） */
+  eq(API2.codeForStatus(429), 'rate_limited', '429 ＝ 被限流（可重試）');
+  eq(API2.codeForStatus(503), 'busy', '503 ＝ 後端忙（可重試）');
+  eq(API2.codeForStatus(504), 'busy', '504 ＝ 閘道超時（可重試）');
+  eq(API2.codeForStatus(500), 'busy', '純 5xx（冇 JSON）＝ 可以重試');
+  eq(API2.codeForStatus(500, true), 'fail', '有 JSON 業務錯就照佢個 code，唔會盲重試');
+  eq(API2.codeForStatus(401), 'no_session', '401 ＝ session 問題（唔係 backoff 嘅事）');
+  assert(OB.isRetriable('load_fail') && OB.isRetriable('save_fail') && OB.isRetriable('network') && OB.isRetriable('rate_limited'), '連線類 code 都要重試 —— 之前 load_fail／save_fail 唔喺白名單，等於冇 backoff');
+  assert(!OB.isRetriable('no_session') && !OB.isRetriable('conflict') && !OB.isRetriable('keep_one'), '權限／撞版／規則錯唔可以盲重試');
+
+  /* ② 讀取都要 backoff：第一次 busy、第二次成功 → 唔應該一鎚定生死 */
+  SYNC.resetSync();
+  S.setMock(false);                                        // 扮真模式（API 全部注入，唔會真連網）
+  SYNC.markBase({ notices: [{ id: 'n-1', title: '旅露營' }] });
+  let reads = 0;
+  const flakyRead = {
+    loadTables: async () => { reads++; return reads === 1 ? { ok: false, code: 'busy', msg: '後端忙' } : { ok: true, data: { data: {}, version: 'v5' } }; },
+    saveTables: async () => ({ ok: true, data: { version: 'v6' } })
+  };
+  const mine = [{ id: 'n-1', title: '野外' }];
+  const rOk = await SYNC.syncNow({ api: flakyRead, tables: { notices: mine } });
+  eq(reads, 2, '讀後端要自動重試（第 2 次成功）');
+  eq(rOk.ok, true, '讀重試成功之後照寫得入');
+
+  /* ③ 寫入失敗：隊列要記住次數同「下次幾時試」，而且下次時間係 backoff＋jitter 出嚟 */
+  SYNC.resetSync();
+  const bad = { loadTables: async () => ({ ok: true, data: { data: {}, version: 'v1' } }), saveTables: async () => ({ ok: false, code: 'busy', msg: '後端忙' }) };
+  const fail = await SYNC.syncNow({ api: bad, tables: { notices: mine } });
+  eq(fail.ok, false, '送唔到唔可以當成功');
+  assert(fail.nextRetryMs > 0 && fail.nextRetryAt > Date.now() - 1000, '要老實報下次重試時間');
+  eq(fail.retriable, true, 'busy 係可重試（唔係死症）');
+  const q1 = OB.readQueue();
+  assert(q1.length >= 1 && q1[0].tries >= 1 && q1[0].nextAt > 0, '隊列項要記 tries ＋ nextAt');
+  const info = SYNC.queueInfo();
+  eq(info.size, q1.length, 'queueInfo 要對得上隊列');
+  assert(info.tries >= 1, 'queueInfo 要報試過幾次');
+
+  /* ④ 未夠鐘：自動 drain 唔會敲後端（force 就係人手優先） */
+  let sends = 0;
+  const counting = { saveTables: async () => { sends++; return { ok: true, data: { version: 'v2' } } } };
+  const early = await SYNC.drainQueue({ api: counting, now: Date.now() });
+  eq(early.code, 'not_due', 'backoff 未夠鐘唔應該敲後端');
+  eq(sends, 0, '未夠鐘＝零請求');
+  assert(/秒後/.test(early.msg || ''), '要講清楚仲有幾耐');
+  const forced = await SYNC.drainQueue({ api: counting, now: Date.now(), force: true });
+  eq(sends, 1, '人手「即刻重試」＝唔等 backoff');
+  eq(forced.ok, true, '送得入就要成功');
+  eq(forced.remaining, 0, '送成功之後隊列清返');
+  eq(SYNC.queueSize(), 0, '隊列乾淨');
+
+  /* ⑤ 失敗多次：下次時間會愈推愈遠（指數）＋有上限 */
+  eq(OB.failQueueItem({ tries: 0 }, { now: 1000, rand: () => 1 }).nextAt, 1000 + OB.backoffMs(1, { rand: () => 1 }), '第 1 次＝base');
+  const t5 = OB.failQueueItem({ tries: 4 }, { now: 1000, rand: () => 1 }).nextAt - 1000;
+  assert(t5 > OB.backoffMs(1, { rand: () => 1 }), '試得多要等得耐啲');
+  assert(OB.backoffMs(50, { rand: () => 1 }) <= OB.RETRY.capMs, '有上限：唔會等到天光');
+
+  /* ⑥ UI：系統 →「同步」要顯示下次自動重試（唔係得個「失敗」兩隻字） */
+  SYNC.resetSync();
+  await SYNC.syncNow({ api: bad, tables: { notices: mine } });
+  /* 睇 UI 前轉返示範模式：真模式 boot 會開靜默刷新 interval（測試唔應該留低定時器） */
+  S.setMock(true);
+  A.loginAs('u-chief');
+  main.boot();
+  fireHash(w, '#/system?tab=sync');
+  const st = text();
+  assert(/下次自動重試/.test(st), 'UI 要顯示下次自動重試時間');
+  assert(/backoff/.test(st) && /jitter/.test(st), '要講明 backoff＋jitter（唔會同一刻一齊撞）');
+  SYNC.resetSync();
+  S.setMock(true);
+  S.resetDemo();
+});
+
 await test('★ 同步 UI：系統 →「同步」分頁（燈號卡＋即刻同步＋隊列＋逐格確認對話框）', async () => {
   A.loginAs('u-chief');
   main.boot();
@@ -1776,6 +1853,10 @@ await test('互動掃描：每個模組／分頁所有掣撳一次（連 async h
   if (results[results.length - 1]?.[0] === 'ok') results[results.length - 1] = ['ok', `互動掃描：撳咗 ${clicks} 個掣，冇例外`];
   S.resetDemo();                                                       // 掃描改過嘅示範資料還原
 });
+
+/* 測試衛生：示範模式／真模式都唔應該留低定時器同 session（唔然個 process 唔會退） */
+A.logout();
+A.stopSilentRefresh();
 
 /* ---------- 報告 ---------- */
 console.log(`\n旅系統 smoke — ${results.filter(r => r[0] === 'ok').length}/${results.length} 通過`);

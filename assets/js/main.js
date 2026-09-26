@@ -68,6 +68,7 @@ export function boot() {
   /* ★ 靜默刷新：session 30 分鐘會靜靜到期 —— 有登入就開始自動續期（示範模式零 fetch） */
   startSilentRefresh(lost => toast(`要做一次重新登入：${lost?.msg || 'session 續唔到'}`, 'warn', '去登入', () => { logout(); renderGate(); }, 9000));
   renderShell();
+  drainQueueWhenDue();                                 // 開機時：夠鐘就補送（離線改動唔會等人記得）
   if (sessionStorage.getItem('troop.mustPw')) { sessionStorage.removeItem('troop.mustPw'); setTimeout(() => openChangePw(true), 250); }
 }
 
@@ -879,6 +880,21 @@ function openChangePw(must) {
 }
 
 /* ---------------- 監聽 ---------------- */
+/* ★ backoff 夠鐘就自動送一次（開機／回到前景）—— 唔會自己無限跑，夠鐘先試 */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') drainQueueWhenDue();
+});
+async function drainQueueWhenDue() {
+  try {
+    const { drainIfDue } = await import('./lib/sync.js');
+    const r = await drainIfDue();
+    if (r && r.ok === false && r.code !== 'mock' && r.code !== 'not_due') {
+      toast(`隊列重試仲未成功（${r.msg || r.code}）—— 改動留住咗`, 'warn', '', null, 6000);
+    } else if (r && r.ok && !r.skipped) {
+      toast(`已自動送回 ${r.sent} 筆暫存改動`, 'ok');
+    }
+  } catch { /* 自動重試唔可以搞到 APP 爆 */ }
+}
 window.addEventListener('hashchange', render);
 document.addEventListener('DOMContentLoaded', boot);
 if (document.readyState !== 'loading') boot();

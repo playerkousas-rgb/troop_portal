@@ -16,8 +16,8 @@
 import * as S from './store.js';
 import * as API from './api.js';
 import {
-  lightOf, makeVersion, readQueue, pushQueue, clearQueue, withRetry,
-  merge3Rows, merge3Batch, backoffMs, versionNewer
+  lightOf, makeVersion, readQueue, saveQueue, pushQueue, clearQueue, withRetry,
+  merge3Rows, merge3Batch, backoffMs, versionNewer, queueDue, failQueueItem, nextRetryIn, isRetriable
 } from './offline.js';
 
 export const isLive = () => !S.isMock();
@@ -106,8 +106,11 @@ export async function syncNow({ api = API, mode = 'ask', tables = null, decision
 
   /* 讀後端（只讀要寫嘅表）—— loadTables 會回 server 版本，記住做 baseVersion */
   const keys = Object.keys(mine);
-  const remote = await safeCall(
-    () => (api.loadTables ? api.loadTables(keys) : api.gasAction('loadTables', { tables: keys })), 'load');
+  /* ★ 讀都要 backoff＋jitter：後端忙／斷網嗰陣唔好一鎚定生死（之前只有寫入有重試） */
+  const readTry = await withRetry(
+    () => safeCall(() => (api.loadTables ? api.loadTables(keys) : api.gasAction('loadTables', { tables: keys })), 'load'),
+    { onRetry: ({ n, wait }) => store({ failing: n, lastError: `讀後端失敗 —— ${wait}ms 後自動再試（第 ${n} 次）` }) });
+  const remote = readTry.result || { ok: false, code: readTry.code || 'load_fail' };
   if (!remote.ok) return failSave(remote, mine, 'load');
   const theirs = remote.data?.data || remote.data?.tables || {};
   const base = st.base || {};
@@ -165,23 +168,67 @@ export async function syncNow({ api = API, mode = 'ask', tables = null, decision
 }
 function failSave(res, tables, where) {
   const st = state();
-  const queued = pushQueue({ at: Date.now(), tables });
-  store({ failing: (st.failing || 0) + 1, lastError: res.msg || res.code || where, dirty: (st.dirty || 0) + 1 });
-  return { ok: false, code: res.code || where + '_fail', msg: res.msg, queued, light: light() };
+  const now = Date.now();
+  /* ★ 隊列記住「試過幾次、下次幾時試」——唔會無限即刻敲，亦唔會好快就死心 */
+  const item = failQueueItem({ at: new Date(now).toISOString(), tables }, { now });
+  const queued = pushQueue(item);
+  store({
+    failing: (st.failing || 0) + 1, lastError: res.msg || res.code || where, dirty: (st.dirty || 0) + 1,
+    nextRetryAt: item.nextAt, queueTries: item.tries
+  });
+  return {
+    ok: false, code: res.code || where + '_fail', msg: res.msg, queued,
+    nextRetryAt: item.nextAt, nextRetryMs: item.nextAt - now, retriable: isRetriable(res.code), light: light()
+  };
 }
 
 /** 隊列仲有幾多（UI 顯示用；同 queueSize 一樣，留個別名免混淆） */
 export const pendingQueue = () => readQueue().length;
-/** 重試隊列：一次過將隊列入面嘅嘢再送（成唔成功都要老實報） */
-export async function drainQueue({ api = API } = {}) {
+/**
+ * 重試隊列：將**夠鐘**嘅隊列項再送（成唔成功都要老實報）。
+ * @param {{api?, now?:number, force?:boolean, rand?:Function}} o
+ *   force=true＝用戶自己撳「即刻重試」：唔理 backoff 都要試（人手優先）
+ */
+export async function drainQueue({ api = API, now = Date.now(), force = false, rand = Math.random } = {}) {
   const q = readQueue();
-  if (!q.length) return { ok: true, sent: 0 };
+  if (!q.length) return { ok: true, sent: 0, remaining: 0, due: 0 };
   if (!isLive()) return { ok: false, code: 'mock' };
-  const merged = Object.assign({}, ...q.map(x => x.tables || {}));
+  const due = force ? q : queueDue(q, now);
+  if (!due.length) {
+    return { ok: false, code: 'not_due', remaining: q.length, due: 0, nextRetryMs: nextRetryIn(q, now), msg: `仲未夠鐘（backoff 中）—— 約 ${Math.ceil(nextRetryIn(q, now) / 1000)} 秒後自動再試` };
+  }
+  const merged = Object.assign({}, ...due.map(x => x.tables || {}));
   const r = await withRetry(() => safeCall(() => api.saveTables(merged), 'save'));
-  if (r.ok) { clearQueue(); store({ dirty: 0, failing: 0, lastError: null, lastAt: Date.now() }); return { ok: true, sent: q.length }; }
-  store({ failing: (state().failing || 0) + 1, lastError: r.msg || r.code });
-  return { ok: false, code: r.code || 'fail', msg: r.msg, remaining: q.length };
+  if (r.ok) {
+    saveQueue(q.filter(x => !due.includes(x)));                       // 只清送咗嗰啲（後面新加嘅留住）
+    const left = readQueue().length;
+    store({ dirty: left, failing: 0, lastError: left ? state().lastError : null, lastAt: Date.now(), nextRetryAt: 0 });
+    return { ok: true, sent: due.length, remaining: left };
+  }
+  /* 失敗：逐筆記次數＋下次時間（backoff＋jitter）；唔會跌 */
+  const failed = q.map(x => (due.includes(x) ? failQueueItem(x, { now, rand }) : x));
+  saveQueue(failed);
+  store({ failing: (state().failing || 0) + 1, lastError: r.msg || r.code, nextRetryAt: Math.min(...failed.map(x => Number(x.nextAt) || 0)) });
+  return { ok: false, code: r.code || 'fail', msg: r.msg, remaining: failed.length, nextRetryMs: nextRetryIn(failed, now) };
 }
 
-export { backoffMs, versionNewer, merge3Rows };
+/* 隊列健康（UI 顯示「下次幾時試」用） */
+export function queueInfo(now = Date.now()) {
+  const q = readQueue();
+  return {
+    size: q.length, due: queueDue(q, now).length,
+    nextRetryMs: nextRetryIn(q, now), tries: q.reduce((m, x) => Math.max(m, Number(x?.tries) || 0), 0),
+    lastTryAt: q.map(x => x.lastTryAt || '').filter(Boolean).sort().pop() || ''
+  };
+}
+/** 有隊列夠鐘未？夠鐘就自動送一次（APP 開機／回到前景時叫；唔會自己無限跑）
+    防重入：開機同「回前景」可以同時叫 —— 唔想同一個隊列兩邊一齊送（會撞版） */
+let _draining = null;
+export async function drainIfDue({ api = API, now = Date.now() } = {}) {
+  if (!isLive() || !queueDue(readQueue(), now).length) return { ok: true, skipped: true };
+  if (_draining) return _draining;
+  _draining = drainQueue({ api, now }).finally(() => { _draining = null; });
+  return _draining;
+}
+
+export { backoffMs, versionNewer, merge3Rows, isRetriable };

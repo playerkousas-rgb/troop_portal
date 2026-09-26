@@ -41,14 +41,37 @@ export function markBaseline(data = S.load()) {
 }
 
 /* ------------------------- 底層 ------------------------- */
+/* ★ 錯誤碼統一（BUILD §10 條 7）：HTTP 狀態 → 一個穩定嘅 code，
+   分清楚「重試有意義」（busy／timeout／network／rate_limited）同「重試都冇用」（權限／規則／版本）。
+   前端唔會再單靠 message 文字判斷係咪應該 backoff。 */
+export function codeForStatus(status, hasBody = false) {
+  const n = Number(status) || 0;
+  if (n === 429) return 'rate_limited';
+  if (n === 408) return 'timeout';
+  if (n === 502 || n === 503 || n === 504) return 'busy';
+  if (n >= 500) return hasBody ? 'fail' : 'busy';       // 有 JSON（業務錯）就照 code；純 5xx＝後端忙
+  if (n === 401 || n === 403) return 'no_session';
+  if (n === 404) return 'not_found';
+  return 'fail';
+}
 const rawPost = async (path, body) => {
-  const r = await fetch(path, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin', body: JSON.stringify(body || {})
-  });
+  let r;
+  try {
+    r = await fetch(path, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin', body: JSON.stringify(body || {})
+    });
+  } catch (e) {
+    /* 斷網／DNS／CORS／被攔：一律 network（可重試），唔可以爆出去 */
+    return { ok: false, code: 'network', msg: `連唔到伺服器（${String(e?.message || e)}）—— 改動會留住，等下次再試`, http: 0 };
+  }
   const j = await r.json().catch(() => null);
-  if (!j) return { ok: false, code: 'bad_response', msg: `回應唔係 JSON（HTTP ${r.status}）` };
-  return j.success === true ? { ok: true, data: j.data, note: j.note, http: r.status } : { ok: false, code: j.code || 'fail', msg: j.error || '失敗', http: r.status };
+  if (!j) {
+    const code = codeForStatus(r.status, false);
+    return { ok: false, code, msg: r.status >= 500 ? `後端忙緊（HTTP ${r.status}）—— 等等再試` : `回應唔係 JSON（HTTP ${r.status}）`, http: r.status };
+  }
+  if (j.success === true) return { ok: true, data: j.data, note: j.note, http: r.status };
+  return { ok: false, code: j.code || codeForStatus(r.status, true), msg: j.error || '失敗', http: r.status };
 };
 /** ★ 靜默刷新：session 靜靜到期會令做做下嘅嘢白做 —— 收到 401 就續期一次再重試（只一次，唔會無限迴圈） */
 const isMockSessionGuard = () => !isLive();
